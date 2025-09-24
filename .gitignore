@@ -1,0 +1,41 @@
+# Logs
+logs
+*.log
+bridge.log
+nohup.out
+
+# Runtime data
+tmp/
+.cache/
+
+# Environment
+.env
+.env.*
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Build outputs
+dist/
+build/
+coverage/
+.nyc_output/
+
+# Editors/OS
+.DS_Store
+.vscode/
+.idea/
+
+# TLS keys (local self-signed)
+key.pem
+cert.pem
+
+# Local data files
+printerMap.json
+printers.json
+
