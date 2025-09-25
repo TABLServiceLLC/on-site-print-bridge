@@ -175,12 +175,12 @@ async function scanNetwork({ cidr, ports, timeoutMs, concurrency, includeNon9100
 
   const results = await mapLimit(ips, concurrency, async (ip) => {
     const reachable = await pingHost(ip, timeoutMs);
-    // Probe ports (at minimum 9100)
-    const openPorts = [];
-    for (const p of ports) {
-      const open = await checkPort(ip, p, timeoutMs);
-      if (open) openPorts.push(p);
-    }
+    // Probe ports concurrently per host for speed
+    const checks = (ports || [9100]).map((p) =>
+      checkPort(ip, p, timeoutMs).then((open) => (open ? p : null))
+    );
+    const checkResults = await Promise.all(checks);
+    const openPorts = checkResults.filter((p) => p != null);
     // Only collect MAC if likely interesting (reachable or any port open)
     let mac = null;
     if (reachable || openPorts.length > 0) {

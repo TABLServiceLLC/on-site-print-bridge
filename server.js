@@ -40,15 +40,7 @@ app.get('/is-ip/:value', (req, res) => {
 });
 
 // Optional example using axios (won't run unless endpoint is called)
-app.get('/httpbin', async (req, res) => {
-    try {
-        const response = await axios.get('https://httpbin.org/get');
-        res.json(response.data);
-    } catch (err) {
-        logger.error('HTTPBIN request failed', { error: err.message });
-        res.status(500).json({ error: err.message });
-    }
-});
+// Example external call route removed to avoid external dependencies
 
 // Basic UI to view printers and assign mapping
 app.get('/ui', (req, res) => {
@@ -349,30 +341,39 @@ app.post('/print', authenticateToken, async (req, res) => {
 const keyPath = path.join(__dirname, 'key.pem');
 const certPath = path.join(__dirname, 'cert.pem');
 
-const credentials = {
-    key: fs.readFileSync(keyPath),
-    cert: fs.readFileSync(certPath),
-};
+function boot() {
+    const credentials = {
+        key: fs.readFileSync(keyPath),
+        cert: fs.readFileSync(certPath),
+    };
+    https.createServer(credentials, app).listen(PORT, () => {
+        logger.info(`HTTPS server listening on https://localhost:${PORT}`);
+    });
 
-https.createServer(credentials, app).listen(PORT, () => {
-    logger.info(`HTTPS server listening on https://localhost:${PORT}`);
-});
+    // ----------------------
+    // Scheduled printer discovery
+    // ----------------------
+    logger.info('Configuring periodic printer discovery', { DISCOVERY_INTERVAL_MS, SUBNET: process.env.SUBNET || null });
+    // Run once at startup
+    runDiscovery(process.env.SUBNET || defaultCidrFromInterfaces()).catch(() => {});
+    // Re-scan every interval
+    setInterval(() => {
+        runDiscovery(discoveryCache.cidr || process.env.SUBNET || defaultCidrFromInterfaces()).catch(() => {});
+    }, DISCOVERY_INTERVAL_MS);
+
+    // ----------------------
+    // Background print poller
+    // ----------------------
+    logger.info('Print poller configured', { PRINT_JOBS_URL, STORE_ID, POLL_INTERVAL_MS, POLL_INSECURE_TLS, POLL_CA_FILE: POLL_CA_FILE || null });
+    setInterval(pollOnce, POLL_INTERVAL_MS);
+    // Kick off immediately
+    setImmediate(pollOnce);
+}
 
 // ----------------------
-// Scheduled printer discovery
+// Background print poller config
 // ----------------------
-logger.info('Configuring periodic printer discovery', { DISCOVERY_INTERVAL_MS, SUBNET: process.env.SUBNET || null });
-// Run once at startup
-runDiscovery(process.env.SUBNET || defaultCidrFromInterfaces()).catch(() => {});
-// Re-scan every 5 minutes
-setInterval(() => {
-    runDiscovery(discoveryCache.cidr || process.env.SUBNET || defaultCidrFromInterfaces()).catch(() => {});
-}, DISCOVERY_INTERVAL_MS);
-
-// ----------------------
-// Background print poller
-// ----------------------
-const PRINT_JOBS_URL = process.env.PRINT_JOBS_URL || 'https://api.myapp.com/print-jobs';
+const PRINT_JOBS_URL = process.env.PRINT_JOBS_URL || 'https://api.example.com/print-jobs';
 const STORE_ID = process.env.STORE_ID || '0';
 const POLL_INTERVAL_MS = parseInt(process.env.PRINT_POLL_INTERVAL_MS || '5000', 10);
 // Outbound auth preference: JWT (JWT_TOKEN or POLL_JWT), fallback to API_TOKEN
@@ -465,10 +466,9 @@ async function pollOnce() {
     }
 }
 
-logger.info('Print poller configured', { PRINT_JOBS_URL, STORE_ID, POLL_INTERVAL_MS, POLL_INSECURE_TLS, POLL_CA_FILE: POLL_CA_FILE || null });
-setInterval(pollOnce, POLL_INTERVAL_MS);
-// Kick off immediately
-setImmediate(pollOnce);
+if (require.main === module && process.env.NODE_ENV !== 'test') {
+    boot();
+}
 // Authentication middleware (JWT)
 // Requires Authorization: Bearer <token> header. Verifies with JWT_SECRET.
 function authenticateToken(req, res, next) {
@@ -494,3 +494,14 @@ function authenticateToken(req, res, next) {
         return res.status(401).json({ error: 'Unauthorized' });
     }
 }
+
+module.exports = {
+    app,
+    boot,
+    sendToPrinter,
+    runDiscovery,
+    fetchPendingPrintJobs,
+    processPrintJob,
+    pollOnce,
+    authenticateToken,
+};
