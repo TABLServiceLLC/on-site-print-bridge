@@ -11,6 +11,7 @@ tmp/
 # Environment
 .env
 .env.*
+!.env.example
 
 # Node.js
 node_modules/
@@ -38,4 +39,3 @@ cert.pem
 # Local data files
 printerMap.json
 printers.json
-
