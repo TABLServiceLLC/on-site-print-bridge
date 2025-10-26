@@ -59,10 +59,15 @@ function requireUiAuth(req, res, next) {
 
 function safeCompare(a, b) {
     if (typeof a !== 'string' || typeof b !== 'string') return false;
+    if (a === b) return true;
     const aBuf = Buffer.from(a, 'utf8');
     const bBuf = Buffer.from(b, 'utf8');
     if (aBuf.length !== bBuf.length) return false;
-    return crypto.timingSafeEqual(aBuf, bBuf);
+    try {
+        return crypto.timingSafeEqual(aBuf, bBuf);
+    } catch (err) {
+        return false;
+    }
 }
 
 app.get('/health', (req, res) => {
