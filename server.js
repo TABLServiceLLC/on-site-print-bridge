@@ -25,7 +25,12 @@ const SESSION_COOKIE_NAME = 'tabl_ui_session';
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const sessions = new Map();
 
-const DEFAULT_ALLOWED_ORIGINS = ['https://pos.tabl.page', 'http://localhost:8080'];
+const DEFAULT_ALLOWED_ORIGINS = [
+    'https://pos.tabl.page',
+    'http://localhost:8080',
+    'https://raspberrypi.local',
+    'https://raspberrypi.local:8443',
+];
 
 function normalizeOrigin(value) {
     if (!value || typeof value !== 'string') return '';
