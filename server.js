@@ -8,6 +8,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const dns = require('dns').promises;
+const crypto = require('crypto');
 const logger = require('./logger');
 const jwt = require('jsonwebtoken');
 
@@ -19,6 +20,9 @@ const { scanNetwork, defaultCidrFromInterfaces } = require('./discoverPrinters')
 const DISCOVERY_INTERVAL_MS = parseInt(process.env.DISCOVERY_INTERVAL_MS || '300000', 10); // 5 minutes
 const DISCOVERY_PORTS = [9100, 515, 631, 80, 443];
 const JWT_SECRET = process.env.JWT_SECRET || '';
+const UI_USERNAME = process.env.UI_USERNAME;
+const UI_PASSWORD = process.env.UI_PASSWORD;
+const UI_AUTH_ENABLED = Boolean(UI_USERNAME && UI_PASSWORD);
 
 // Middleware
 app.use(cors());
@@ -26,6 +30,39 @@ app.use(bodyParser.json());
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 // Routes
+
+function requireUiAuth(req, res, next) {
+    if (!UI_AUTH_ENABLED) return next();
+    const header = req.headers['authorization'] || req.headers['Authorization'];
+    if (!header || !header.startsWith('Basic ')) {
+        res.set('WWW-Authenticate', 'Basic realm="TABL Bridge UI"');
+        return res.status(401).send('Authentication required');
+    }
+    let decoded;
+    try {
+        decoded = Buffer.from(header.replace(/^Basic\s+/i, ''), 'base64').toString('utf8');
+    } catch (err) {
+        res.set('WWW-Authenticate', 'Basic realm="TABL Bridge UI"');
+        return res.status(401).send('Invalid credentials');
+    }
+    const separatorIndex = decoded.indexOf(':');
+    const providedUser = separatorIndex >= 0 ? decoded.slice(0, separatorIndex) : decoded;
+    const providedPass = separatorIndex >= 0 ? decoded.slice(separatorIndex + 1) : '';
+    const usernameOk = safeCompare(providedUser, UI_USERNAME);
+    const passwordOk = safeCompare(providedPass, UI_PASSWORD);
+    if (usernameOk && passwordOk) return next();
+    res.set('WWW-Authenticate', 'Basic realm="TABL Bridge UI"');
+    return res.status(401).send('Invalid credentials');
+}
+
+function safeCompare(a, b) {
+    if (typeof a !== 'string' || typeof b !== 'string') return false;
+    const aBuf = Buffer.from(a);
+    const bBuf = Buffer.from(b);
+    if (aBuf.length !== bBuf.length) return false;
+    return crypto.timingSafeEqual(aBuf, bBuf);
+}
+
 app.get('/health', (req, res) => {
     res.json({ status: 'ok' });
 });
@@ -44,7 +81,7 @@ app.get('/is-ip/:value', (req, res) => {
 // Example external call route removed to avoid external dependencies
 
 // Basic UI to view printers and assign mapping
-app.get('/ui', (req, res) => {
+app.get('/ui', requireUiAuth, (req, res) => {
     const html = `<!doctype html>
 <html lang="en">
 <head>
