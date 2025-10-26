@@ -46,8 +46,10 @@ function defaultCidrFromInterfaces() {
     for (const info of ifaces[name]) {
       if (info.family === 'IPv4' && !info.internal) {
         const prefix = maskToPrefix(info.netmask);
-        const baseInt = ipToInt(info.address) & (prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0);
-        return `${intToIp(baseInt >>> 0)}/${prefix}`;
+        const adjustedPrefix = prefix < 24 ? 24 : prefix;
+        const mask = adjustedPrefix === 0 ? 0 : (~0 << (32 - adjustedPrefix)) >>> 0;
+        const baseInt = ipToInt(info.address) & mask;
+        return `${intToIp(baseInt >>> 0)}/${adjustedPrefix}`;
       }
     }
   }

@@ -41,8 +41,8 @@ describe('server endpoints', () => {
     expect(onDisk['t2']).toBe('192.168.1.55');
   });
 
-  test('GET /printers triggers discovery on refresh', async () => {
-    const res = await request(app).get('/printers?refresh=true').set(auth).expect(200);
+  test('GET /printers triggers discovery on refresh without auth', async () => {
+    const res = await request(app).get('/printers?refresh=true').expect(200);
     expect(res.body).toHaveProperty('printers');
     expect(res.body.printers.length).toBe(1);
     expect(res.body.printers[0].ip).toBe('192.168.1.100');

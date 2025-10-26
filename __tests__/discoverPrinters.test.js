@@ -36,10 +36,15 @@ jest.mock('net', () => {
   return { Socket: FakeSocket };
 });
 
-describe('discoverPrinters.scanNetwork', () => {
+describe('discoverPrinters utilities', () => {
   const modPath = path.resolve(__dirname, '../discoverPrinters.js');
   // require after mocks
-  const { scanNetwork } = require(modPath);
+  const { scanNetwork, defaultCidrFromInterfaces } = require(modPath);
+  const os = require('os');
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
 
   test('finds only hosts with 9100 open by default', async () => {
     const res = await scanNetwork({ cidr: '10.0.0.0/30', ports: [9100, 515], timeoutMs: 50, concurrency: 2 });
@@ -54,5 +59,13 @@ describe('discoverPrinters.scanNetwork', () => {
     const ips = res.map(r => r.ip).sort();
     expect(ips).toEqual(['10.0.0.1', '10.0.0.2']);
   });
-});
 
+  test('defaultCidrFromInterfaces narrows wide masks to /24 on active interface', () => {
+    jest.spyOn(os, 'networkInterfaces').mockReturnValue({
+      eth0: [
+        { family: 'IPv4', address: '192.168.5.23', netmask: '255.255.252.0', internal: false }
+      ]
+    });
+    expect(defaultCidrFromInterfaces()).toBe('192.168.5.0/24');
+  });
+});

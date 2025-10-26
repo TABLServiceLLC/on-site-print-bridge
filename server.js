@@ -219,7 +219,7 @@ async function runDiscovery(cidr) {
     }
 }
 
-app.get('/printers', authenticateToken, async (req, res) => {
+app.get('/printers', async (req, res) => {
     try {
         if (truthy(req.query.refresh)) {
             const cidr = req.query.cidr || discoveryCache.cidr || process.env.SUBNET || defaultCidrFromInterfaces();

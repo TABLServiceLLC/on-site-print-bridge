@@ -48,7 +48,7 @@ HTTPS print bridge for ESC/POS printers. Discovers printers on the LAN and forwa
   - Or replace `process.env.JWT_SECRET` above with your actual secret
 - Verify it’s running
   - Health: `curl -k https://localhost:8443/health`
-  - Discover printers: `curl -k -H "Authorization: Bearer $TOKEN" "https://localhost:8443/printers?refresh=true"`
+- Discover printers: `curl -k "https://localhost:8443/printers?refresh=true"`
 - Map a terminal to a printer
   - `curl -k -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
     -d '{"terminalId":"t1","ip":"192.168.1.50"}' https://localhost:8443/assign`
@@ -69,7 +69,7 @@ Set in `.env` (defaults shown where applicable):
 - `PORT` — HTTPS port (default `8443`)
 - `JWT_SECRET` — secret used to verify inbound JWTs (required)
 - Discovery
-  - `SUBNET` — CIDR to scan (defaults to inferred interface or `192.168.1.0/24`)
+  - `SUBNET` — CIDR to scan (defaults to host interface constrained to `/24`, e.g. `192.168.5.x` → `192.168.5.0/24`; fallback `192.168.1.0/24`)
   - `DISCOVERY_INTERVAL_MS` — periodic re-scan interval (default `300000`)
 - Polling (optional)
   - `PRINT_JOBS_URL` — cloud endpoint for pending jobs (leave unset to disable polling)
@@ -94,9 +94,8 @@ The following endpoints require `Authorization: Bearer <jwt>` verifiable with `J
 
 - `POST /print`
 - `POST /assign`
-- `GET /printers`
 
-Note: The UI at `/ui` is unauthenticated, but the API it calls (`/printers`) requires a JWT. For local debugging, call the API with a token (see Examples) or temporarily relax auth in code.
+Note: `/ui` and `/printers` are unauthenticated so the UI can load discovery results without extra configuration.
 
 ---
 
@@ -104,14 +103,14 @@ Note: The UI at `/ui` is unauthenticated, but the API it calls (`/printers`) req
 
 - `GET /health` — Health check
 - `GET /ui` — Minimal web UI for discovery and mapping
-- `GET /printers` — Returns discovered printers (JWT)
+- `GET /printers` — Returns discovered printers
 - `POST /assign` — Body `{ terminalId, ip }` (JWT)
 - `POST /print` — Body `{ terminalId, data }` with `data` base64 (JWT)
 
 Examples:
 
-- List printers (replace `<JWT>`):
-  - `curl -k -H "Authorization: Bearer <JWT>" https://localhost:8443/printers`
+- List printers:
+  - `curl -k https://localhost:8443/printers`
 - Assign mapping:
   - `curl -k -H "Authorization: Bearer <JWT>" -H "Content-Type: application/json" -d '{"terminalId":"t1","ip":"192.168.1.50"}' https://localhost:8443/assign`
 - Print job:
@@ -121,7 +120,7 @@ Examples:
 
 ## ⚙️ Behavior
 
-- Discovery runs on startup and every `DISCOVERY_INTERVAL_MS`. Force refresh with `/printers?refresh=true` (JWT).
+- Discovery runs on startup and every `DISCOVERY_INTERVAL_MS`. Force refresh with `/printers?refresh=true`.
 - When `PRINT_JOBS_URL` is set, the poller fetches from `PRINT_JOBS_URL?storeId=<STORE_ID>` on an interval and prints using saved mappings.
 - Raw print is sent to the mapped printer on port `9100`.
 - Logs append to `LOG_FILE` (default `bridge.log`).
@@ -138,7 +137,7 @@ Examples:
 
 ## 🧰 Troubleshooting
 
-- UI loads but no printers: ensure requests include a valid JWT for `/printers`.
+- UI loads but no printers: wait for discovery to finish or click Refresh; inspect `bridge.log` for recent scan results.
 - Cert warnings in browser: self-signed cert. Use `-k` in curl or trust the cert.
 - Cloud polling TLS: set `PRINT_POLL_CA_FILE` for private CAs; avoid `PRINT_POLL_INSECURE_TLS=true` unless necessary.
 
