@@ -20,9 +20,11 @@ const { scanNetwork, defaultCidrFromInterfaces } = require('./discoverPrinters')
 const DISCOVERY_INTERVAL_MS = parseInt(process.env.DISCOVERY_INTERVAL_MS || '300000', 10); // 5 minutes
 const DISCOVERY_PORTS = [9100, 515, 631, 80, 443];
 const JWT_SECRET = process.env.JWT_SECRET || '';
-const UI_USERNAME = process.env.UI_USERNAME;
-const UI_PASSWORD = process.env.UI_PASSWORD;
-const UI_AUTH_ENABLED = Boolean(UI_USERNAME && UI_PASSWORD);
+const rawUiUser = process.env.UI_USERNAME;
+const rawUiPass = process.env.UI_PASSWORD;
+const UI_USERNAME = typeof rawUiUser === 'string' ? rawUiUser.trim() : '';
+const UI_PASSWORD = typeof rawUiPass === 'string' ? rawUiPass.trim() : '';
+const UI_AUTH_ENABLED = UI_USERNAME.length > 0 && UI_PASSWORD.length > 0;
 
 // Middleware
 app.use(cors());
@@ -57,8 +59,8 @@ function requireUiAuth(req, res, next) {
 
 function safeCompare(a, b) {
     if (typeof a !== 'string' || typeof b !== 'string') return false;
-    const aBuf = Buffer.from(a);
-    const bBuf = Buffer.from(b);
+    const aBuf = Buffer.from(a, 'utf8');
+    const bBuf = Buffer.from(b, 'utf8');
     if (aBuf.length !== bBuf.length) return false;
     return crypto.timingSafeEqual(aBuf, bBuf);
 }
