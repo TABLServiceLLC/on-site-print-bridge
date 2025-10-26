@@ -23,6 +23,7 @@ const JWT_SECRET = process.env.JWT_SECRET || '';
 // Middleware
 app.use(cors());
 app.use(bodyParser.json());
+app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 // Routes
 app.get('/health', (req, res) => {
@@ -45,49 +46,232 @@ app.get('/is-ip/:value', (req, res) => {
 // Basic UI to view printers and assign mapping
 app.get('/ui', (req, res) => {
     const html = `<!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Print Bridge UI</title>
+  <title>TABL Print Bridge</title>
+  <meta name="theme-color" content="#3B7FBE" />
+  <link rel="icon" type="image/x-icon" href="/assets/favicon.ico" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.webp" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.webp" />
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.webp" />
+  <link rel="manifest" href="/assets/site.webmanifest" />
   <style>
-    body { font-family: -apple-system, system-ui, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; color: #222; }
-    h1 { font-size: 20px; margin: 0 0 12px; }
-    .controls { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
-    button, input, select { font-size: 14px; padding: 6px 10px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-    th, td { text-align: left; border-bottom: 1px solid #ddd; padding: 8px; }
-    th { background: #f6f6f6; position: sticky; top: 0; }
-    .status { font-size: 12px; color: #666; margin-top: 8px; }
-    .badge { display: inline-block; background: #eef; color: #224; padding: 2px 6px; border-radius: 10px; font-size: 12px; margin-right: 4px; }
-    .ok { color: #0a0; }
-    .err { color: #a00; }
-    .muted { color: #666; }
+    :root { color-scheme: light; font-size: 16px; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, Arial, sans-serif;
+      background: linear-gradient(180deg, #f2f7ff 0%, #ffffff 100%);
+      color: #0f172a;
+    }
+    .page {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 48px 24px 64px;
+    }
+    .hero {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      margin-bottom: 32px;
+      padding: 32px;
+      border-radius: 20px;
+      background: linear-gradient(135deg, #0f1b33 0%, #3B7FBE 100%);
+      color: #f8fbff;
+      box-shadow: 0 20px 45px rgba(13, 51, 102, 0.25);
+    }
+    .hero__logo {
+      width: 160px;
+      flex-shrink: 0;
+    }
+    .hero__title {
+      margin: 0;
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .hero__subtitle {
+      margin: 8px 0 0;
+      font-size: 16px;
+      color: rgba(248, 251, 255, 0.85);
+    }
+    .card {
+      background: #fff;
+      border-radius: 18px;
+      box-shadow: 0 14px 40px rgba(15, 23, 42, 0.08);
+      padding: 24px 28px;
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .controls__summary {
+      margin-left: auto;
+      font-size: 14px;
+      color: #475569;
+    }
+    button {
+      border: none;
+      border-radius: 10px;
+      padding: 10px 18px;
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      cursor: pointer;
+      transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+    }
+    button:focus-visible {
+      outline: 3px solid rgba(59, 127, 190, 0.55);
+      outline-offset: 2px;
+    }
+    .btn-primary {
+      background: #3B7FBE;
+      color: #fff;
+      box-shadow: 0 10px 20px rgba(59, 127, 190, 0.35);
+    }
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 12px 26px rgba(59, 127, 190, 0.4);
+    }
+    .btn-outline {
+      background: #e7f1fc;
+      color: #265785;
+    }
+    .btn-outline:hover {
+      background: #d9e8f9;
+      transform: translateY(-1px);
+    }
+    .table-wrapper {
+      overflow-x: auto;
+      border-radius: 14px;
+      border: 1px solid #e2e8f0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 640px;
+      background: #fff;
+    }
+    th, td {
+      text-align: left;
+      padding: 14px 16px;
+      border-bottom: 1px solid #e2e8f0;
+      font-size: 14px;
+    }
+    th {
+      background: #f8fbff;
+      font-weight: 600;
+      color: #1e293b;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    code {
+      font-family: SFMono-Regular, SFMono, ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 13px;
+      color: #0f172a;
+      background: #f1f5f9;
+      padding: 2px 6px;
+      border-radius: 6px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      background: rgba(59, 127, 190, 0.12);
+      color: #265785;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-right: 6px;
+    }
+    .status {
+      font-size: 13px;
+      color: #475569;
+      margin: 16px 4px 0;
+    }
+    .status strong {
+      font-weight: 600;
+    }
+    .ok { color: #0f9d58; font-weight: 600; }
+    .err { color: #d93025; font-weight: 600; }
+    .muted { color: #94a3b8; }
+    .assign {
+      background: transparent;
+      border: 1px solid rgba(59, 127, 190, 0.6);
+      color: #1e3a5f;
+      padding: 8px 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 120ms ease, color 120ms ease, transform 120ms ease;
+    }
+    .assign:hover {
+      background: rgba(59, 127, 190, 0.12);
+      transform: translateY(-1px);
+    }
+    @media (max-width: 720px) {
+      .hero {
+        flex-direction: column;
+        align-items: flex-start;
+        text-align: left;
+      }
+      .hero__logo {
+        width: 140px;
+      }
+      .controls {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .controls__summary {
+        margin-left: 0;
+      }
+      table {
+        min-width: 520px;
+      }
+    }
   </style>
  </head>
 <body>
-  <h1>Print Bridge</h1>
-  <div class="controls">
-    <button id="refresh">Refresh</button>
-    <button id="rescan">Re-scan LAN</button>
-    <span id="summary" class="muted"></span>
+  <div class="page">
+    <header class="hero">
+      <img class="hero__logo" src="/assets/TABL_Logo.svg" alt="TABL" />
+      <div>
+        <p class="hero__title">TABL Print Bridge</p>
+        <p class="hero__subtitle">Discover printers on your network and assign them to TABL terminals with confidence.</p>
+      </div>
+    </header>
+    <section class="card">
+      <div class="controls">
+        <button id="refresh" class="btn-primary">Refresh</button>
+        <button id="rescan" class="btn-outline">Re-scan LAN</button>
+        <span id="summary" class="controls__summary muted"></span>
+      </div>
+      <div class="table-wrapper">
+        <table id="tbl">
+          <thead>
+            <tr>
+              <th>IP</th>
+              <th>Ports</th>
+              <th>MAC</th>
+              <th>Hostname</th>
+              <th>Assign</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td colspan="5" class="muted">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="status" id="status"></p>
+    </section>
   </div>
-  <table id="tbl">
-    <thead>
-      <tr>
-        <th>IP</th>
-        <th>Ports</th>
-        <th>MAC</th>
-        <th>Hostname</th>
-        <th>Assign</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr><td colspan="5" class="muted">Loading…</td></tr>
-    </tbody>
-  </table>
-  <p class="status" id="status"></p>
-
   <script>
     const $ = (sel) => document.querySelector(sel);
     const tblBody = $('#tbl tbody');
