@@ -661,6 +661,10 @@ app.post('/echo', (req, res) => {
     res.json({ received: req.body });
 });
 
+app.get('/', (req, res) => {
+    res.redirect('/ui');
+});
+
 app.get('/login', (req, res) => {
     const state = getUiAuthState();
     if (!state.enabled) {
