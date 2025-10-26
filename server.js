@@ -468,6 +468,62 @@ function renderProfilePage({ username = '', error = '', success = '' } = {}) {
       transform: translateY(-1px);
       box-shadow: 0 12px 30px rgba(59, 127, 190, 0.42);
     }
+    .modal {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 40;
+    }
+    .modal.is-open {
+      display: flex;
+    }
+    .modal__overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.45);
+      backdrop-filter: blur(2px);
+    }
+    .modal__content {
+      position: relative;
+      background: #fff;
+      border-radius: 16px;
+      padding: 22px 26px 24px;
+      max-width: 360px;
+      width: calc(100% - 48px);
+      box-shadow: 0 26px 60px rgba(15, 31, 55, 0.35);
+      z-index: 1;
+    }
+    .modal__title {
+      margin: 0 0 10px;
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .modal__body {
+      font-size: 14px;
+      color: #475569;
+      margin-bottom: 18px;
+    }
+    .modal__actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+    .modal__actions button {
+      padding: 10px 16px;
+      border-radius: 10px;
+    }
+    .btn-secondary {
+      background: rgba(15, 27, 51, 0.08);
+      color: #102542;
+      box-shadow: none;
+    }
+    .btn-secondary:hover {
+      transform: none;
+      box-shadow: none;
+      background: rgba(15, 27, 51, 0.12);
+    }
     @media (max-width: 520px) {
       .container {
         padding: 28px 22px;
@@ -489,21 +545,16 @@ function renderProfilePage({ username = '', error = '', success = '' } = {}) {
     <section class="section">
       <header class="section__header">
         <h2 class="section__title">Username</h2>
-        <p class="section__subtitle">Update the name shown in the bridge dashboard.</p>
+        <p class="section__subtitle">Update the name used to sign in and shown in the dashboard.</p>
       </header>
-      <form method="POST" action="/profile" autocomplete="off" novalidate>
+      <form id="username-form" method="POST" action="/profile" autocomplete="off" novalidate>
         <input type="hidden" name="intent" value="update-username" />
         <div>
           <label for="profile-username">Username</label>
           <input type="text" id="profile-username" name="username" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" inputmode="text" required value="${safeUsername}" />
         </div>
-        <div>
-          <label for="profile-current-password-username">Current password</label>
-          <input type="password" id="profile-current-password-username" name="currentPassword" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" required />
-          <p class="helper">Required to confirm this change.</p>
-        </div>
         <div class="actions">
-          <button type="submit">Save username</button>
+          <button type="button" id="username-save-btn">Save username</button>
         </div>
       </form>
     </section>
@@ -533,6 +584,59 @@ function renderProfilePage({ username = '', error = '', success = '' } = {}) {
       </form>
     </section>
   </div>
+  <div class="modal" id="username-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="username-modal-title">
+    <div class="modal__overlay" data-close="true"></div>
+    <div class="modal__content">
+      <h3 class="modal__title" id="username-modal-title">Confirm username change</h3>
+      <div class="modal__body">
+        The next time you sign in, you'll need to use the new username. Continue?
+      </div>
+      <div class="modal__actions">
+        <button type="button" class="btn-secondary" data-close="true">Cancel</button>
+        <button type="button" id="username-confirm-btn">Yes, update</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      const form = document.getElementById('username-form');
+      const saveBtn = document.getElementById('username-save-btn');
+      const modal = document.getElementById('username-confirm-modal');
+      const confirmBtn = document.getElementById('username-confirm-btn');
+      const closeTargets = modal ? modal.querySelectorAll('[data-close="true"]') : [];
+
+      function openModal() {
+        if (modal) modal.classList.add('is-open');
+      }
+
+      function closeModal() {
+        if (modal) modal.classList.remove('is-open');
+      }
+
+      if (saveBtn) {
+        saveBtn.addEventListener('click', (event) => {
+          event.preventDefault();
+          if (!form || !form.reportValidity()) return;
+          openModal();
+        });
+      }
+
+      if (confirmBtn && form) {
+        confirmBtn.addEventListener('click', () => {
+          closeModal();
+          form.submit();
+        });
+      }
+
+      closeTargets.forEach((el) => {
+        el.addEventListener('click', () => closeModal());
+      });
+
+      document.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape') closeModal();
+      });
+    })();
+  </script>
 </body>
 </html>`;
 }
@@ -638,13 +742,10 @@ app.post('/profile', requireUiAuth, (req, res) => {
     if (intent === 'update-username') {
         const targetUsername = submittedUser;
         if (!targetUsername) {
-            return respond({ status: 400, username: '', error: 'Username is required.' });
+            return respond({ status: 400, username: state.username, error: 'Username is required.' });
         }
-        if (!currentPassword) {
-            return respond({ status: 400, username: targetUsername, error: 'Current password is required.' });
-        }
-        if (!constantTimeCompare(currentPassword, state.password)) {
-            return respond({ status: 401, username: targetUsername, error: 'Current password is incorrect.' });
+        if (!state.password) {
+            return respond({ status: 500, username: state.username, error: 'Password missing from credentials store.' });
         }
         try {
             writeCredentials({ username: targetUsername, password: state.password });
@@ -659,7 +760,7 @@ app.post('/profile', requireUiAuth, (req, res) => {
         const newSessionId = createSession(targetUsername);
         setSessionCookie(res, newSessionId);
         res.locals.uiUser = targetUsername;
-        return respond({ username: targetUsername, success: 'Username updated.' });
+        return respond({ username: targetUsername, success: 'Username updated. Use this on your next login.' });
     }
 
     if (intent === 'update-password') {
