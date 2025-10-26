@@ -63,7 +63,13 @@ app.get('/ui', (req, res) => {
     body {
       margin: 0;
       font-family: -apple-system, system-ui, Segoe UI, Roboto, Arial, sans-serif;
-      background: linear-gradient(180deg, #f2f7ff 0%, #ffffff 100%);
+      background-color: #f5f7fb;
+      background-image:
+        radial-gradient(120% 120% at 12% -10%, rgba(59, 127, 190, 0.14), transparent 55%),
+        radial-gradient(120% 120% at 88% 0%, rgba(15, 27, 51, 0.1), transparent 60%),
+        linear-gradient(180deg, #f6f9ff 0%, #ffffff 100%);
+      background-attachment: fixed;
+      background-repeat: no-repeat;
       color: #0f172a;
     }
     .page {
