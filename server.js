@@ -25,49 +25,270 @@ const rawUiPass = process.env.UI_PASSWORD;
 const UI_USERNAME = typeof rawUiUser === 'string' ? rawUiUser.trim() : '';
 const UI_PASSWORD = typeof rawUiPass === 'string' ? rawUiPass.trim() : '';
 const UI_AUTH_ENABLED = UI_USERNAME.length > 0 && UI_PASSWORD.length > 0;
+const SESSION_COOKIE_NAME = 'tabl_ui_session';
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const sessions = new Map();
 
 // Middleware
 app.use(cors());
 app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: false }));
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 // Routes
 
-function requireUiAuth(req, res, next) {
-    if (!UI_AUTH_ENABLED) return next();
-    const header = req.headers['authorization'] || req.headers['Authorization'];
-    if (!header || !header.startsWith('Basic ')) {
-        res.set('WWW-Authenticate', 'Basic realm="TABL Bridge UI"');
-        return res.status(401).send('Authentication required');
-    }
-    let decoded;
-    try {
-        decoded = Buffer.from(header.replace(/^Basic\s+/i, ''), 'base64').toString('utf8');
-    } catch (err) {
-        res.set('WWW-Authenticate', 'Basic realm="TABL Bridge UI"');
-        return res.status(401).send('Invalid credentials');
-    }
-    const separatorIndex = decoded.indexOf(':');
-    const providedUser = separatorIndex >= 0 ? decoded.slice(0, separatorIndex) : decoded;
-    const providedPass = separatorIndex >= 0 ? decoded.slice(separatorIndex + 1) : '';
-    const usernameOk = safeCompare(providedUser, UI_USERNAME);
-    const passwordOk = safeCompare(providedPass, UI_PASSWORD);
-    if (usernameOk && passwordOk) return next();
-    res.set('WWW-Authenticate', 'Basic realm="TABL Bridge UI"');
-    return res.status(401).send('Invalid credentials');
+function parseCookies(req) {
+    const header = req.headers.cookie;
+    if (!header) return {};
+    return header.split(';').reduce((acc, chunk) => {
+        const index = chunk.indexOf('=');
+        if (index === -1) return acc;
+        const key = chunk.slice(0, index).trim();
+        const value = chunk.slice(index + 1).trim();
+        if (key) {
+            try {
+                acc[key] = decodeURIComponent(value);
+            } catch (_) {
+                acc[key] = value;
+            }
+        }
+        return acc;
+    }, {});
 }
 
-function safeCompare(a, b) {
+function getSession(req) {
+    const cookies = parseCookies(req);
+    const sessionId = cookies[SESSION_COOKIE_NAME];
+    if (!sessionId) return null;
+    const entry = sessions.get(sessionId);
+    if (!entry || entry.expiresAt <= Date.now()) {
+        sessions.delete(sessionId);
+        return null;
+    }
+    // sliding expiration
+    entry.expiresAt = Date.now() + SESSION_TTL_MS;
+    sessions.set(sessionId, entry);
+    return { id: sessionId, username: entry.username };
+}
+
+function createSession(username) {
+    const id = crypto.randomBytes(32).toString('hex');
+    sessions.set(id, { username, expiresAt: Date.now() + SESSION_TTL_MS });
+    return id;
+}
+
+function destroySession(sessionId) {
+    if (!sessionId) return;
+    sessions.delete(sessionId);
+}
+
+function pushCookie(res, cookieValue) {
+    const existing = res.getHeader('Set-Cookie');
+    if (!existing) {
+        res.setHeader('Set-Cookie', cookieValue);
+    } else if (Array.isArray(existing)) {
+        res.setHeader('Set-Cookie', existing.concat(cookieValue));
+    } else {
+        res.setHeader('Set-Cookie', [existing, cookieValue]);
+    }
+}
+
+function setSessionCookie(res, sessionId) {
+    const maxAgeSeconds = Math.floor(SESSION_TTL_MS / 1000);
+    pushCookie(res, `${SESSION_COOKIE_NAME}=${encodeURIComponent(sessionId)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${maxAgeSeconds}`);
+}
+
+function clearSessionCookie(res) {
+    pushCookie(res, `${SESSION_COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`);
+}
+
+function constantTimeCompare(a, b) {
     if (typeof a !== 'string' || typeof b !== 'string') return false;
-    if (a === b) return true;
-    const aBuf = Buffer.from(a, 'utf8');
-    const bBuf = Buffer.from(b, 'utf8');
-    if (aBuf.length !== bBuf.length) return false;
+    if (a.length === 0 || b.length === 0) return false;
     try {
-        return crypto.timingSafeEqual(aBuf, bBuf);
+        const bufA = Buffer.from(a, 'utf8');
+        const bufB = Buffer.from(b, 'utf8');
+        if (bufA.length !== bufB.length) return false;
+        return crypto.timingSafeEqual(bufA, bufB);
     } catch (err) {
         return false;
     }
+}
+
+function sanitizeRedirectTarget(target) {
+    if (typeof target !== 'string' || target.length === 0) return '/ui';
+    try {
+        const decoded = decodeURIComponent(target);
+        if (!decoded.startsWith('/')) return '/ui';
+        if (decoded.startsWith('//')) return '/ui';
+        return decoded;
+    } catch (_) {
+        return '/ui';
+    }
+}
+
+function renderLoginPage({ redirectTo = '/ui', error = '' } = {}) {
+    const errorBlock = error
+        ? `<div class="alert"><strong>Login failed.</strong> ${error}</div>`
+        : '';
+    return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TABL Print Bridge Login</title>
+  <meta name="theme-color" content="#3B7FBE" />
+  <link rel="icon" type="image/x-icon" href="/assets/favicon.ico" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.webp" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.webp" />
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.webp" />
+  <link rel="manifest" href="/assets/site.webmanifest" />
+  <style>
+    :root { color-scheme: light; font-size: 16px; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, Arial, sans-serif;
+      background: radial-gradient(120% 120% at 20% -10%, rgba(59, 127, 190, 0.2), transparent 55%),
+                  radial-gradient(110% 110% at 90% 0%, rgba(15, 27, 51, 0.16), transparent 60%),
+                  linear-gradient(180deg, #0f172a 0%, #1e3a5f 45%, #ffffff 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #0f172a;
+      padding: 24px;
+    }
+    .card {
+      background: rgba(248, 251, 255, 0.96);
+      border-radius: 20px;
+      box-shadow: 0 22px 60px rgba(13, 51, 102, 0.30);
+      max-width: 420px;
+      width: 100%;
+      padding: 42px 36px 36px;
+    }
+    .logo {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 28px;
+    }
+    .logo img {
+      width: 180px;
+      height: auto;
+    }
+    h1 {
+      text-align: center;
+      margin: 0 0 12px;
+      font-size: 26px;
+      font-weight: 700;
+      color: #0f172a;
+      letter-spacing: -0.01em;
+    }
+    p.subtitle {
+      text-align: center;
+      color: #4b5563;
+      margin: 0 0 28px;
+      font-size: 15px;
+    }
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #1e293b;
+      margin-bottom: 8px;
+    }
+    input {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(30, 58, 95, 0.2);
+      font-size: 15px;
+      transition: border-color 120ms ease, box-shadow 120ms ease;
+      background: #fff;
+    }
+    input:focus {
+      outline: none;
+      border-color: rgba(59, 127, 190, 0.8);
+      box-shadow: 0 0 0 4px rgba(59, 127, 190, 0.25);
+    }
+    button {
+      width: 100%;
+      margin-top: 28px;
+      padding: 12px 16px;
+      border: none;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #3B7FBE 0%, #265785 100%);
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      cursor: pointer;
+      box-shadow: 0 14px 28px rgba(59, 127, 190, 0.45);
+      transition: transform 120ms ease, box-shadow 120ms ease;
+    }
+    button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 16px 32px rgba(59, 127, 190, 0.5);
+    }
+    button:focus-visible {
+      outline: 3px solid rgba(59, 127, 190, 0.55);
+      outline-offset: 2px;
+    }
+    .field {
+      margin-bottom: 18px;
+    }
+    .alert {
+      background: rgba(217, 48, 37, 0.12);
+      color: #b3261e;
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 13px;
+      margin-bottom: 20px;
+      border: 1px solid rgba(217, 48, 37, 0.2);
+    }
+    .meta {
+      margin-top: 24px;
+      font-size: 12px;
+      text-align: center;
+      color: #64748b;
+    }
+  </style>
+</head>
+<body>
+  <main class="card" role="main">
+    <div class="logo">
+      <img src="/assets/TABL_Logo.svg" alt="TABL" />
+    </div>
+    <h1>Sign in</h1>
+    <p class="subtitle">Enter the bridge credentials to continue.</p>
+    ${errorBlock}
+    <form method="POST" action="/login" novalidate>
+      <input type="hidden" name="redirect" value="${encodeURIComponent(redirectTo)}" />
+      <div class="field">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" autocomplete="username" required />
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" autocomplete="current-password" required />
+      </div>
+      <button type="submit">Access Bridge</button>
+    </form>
+    <p class="meta">Need help? Check the device configuration file.</p>
+  </main>
+</body>
+</html>`;
+}
+
+function requireUiAuth(req, res, next) {
+    if (!UI_AUTH_ENABLED) return next();
+    const session = getSession(req);
+    if (session) {
+        res.locals.uiUser = session.username;
+        return next();
+    }
+    const redirectTarget = encodeURIComponent(req.originalUrl || '/ui');
+    return res.redirect(`/login?redirect=${redirectTarget}`);
 }
 
 app.get('/health', (req, res) => {
@@ -76,6 +297,56 @@ app.get('/health', (req, res) => {
 
 app.post('/echo', (req, res) => {
     res.json({ received: req.body });
+});
+
+app.get('/login', (req, res) => {
+    if (!UI_AUTH_ENABLED) {
+        return res.redirect('/ui');
+    }
+    const session = getSession(req);
+    const redirectTarget = sanitizeRedirectTarget(req.query.redirect);
+    if (session) {
+        return res.redirect(redirectTarget);
+    }
+    res.set('Content-Type', 'text/html');
+    res.send(renderLoginPage({ redirectTo: redirectTarget }));
+});
+
+app.post('/login', (req, res) => {
+    if (!UI_AUTH_ENABLED) {
+        return res.redirect('/ui');
+    }
+    const session = getSession(req);
+    if (session) {
+        return res.redirect(sanitizeRedirectTarget(req.body && req.body.redirect));
+    }
+    const submittedUser = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
+    const submittedPass = typeof req.body?.password === 'string' ? req.body.password : '';
+    const redirectTarget = sanitizeRedirectTarget(req.body?.redirect);
+
+    const userOk = constantTimeCompare(submittedUser, UI_USERNAME);
+    const passOk = constantTimeCompare(submittedPass, UI_PASSWORD);
+
+    if (userOk && passOk) {
+        const sessionId = createSession(UI_USERNAME);
+        setSessionCookie(res, sessionId);
+        return res.redirect(redirectTarget);
+    }
+
+    clearSessionCookie(res);
+    res.status(401);
+    res.set('Content-Type', 'text/html');
+    res.send(renderLoginPage({ redirectTo: redirectTarget, error: 'Check your username and password and try again.' }));
+});
+
+app.post('/logout', (req, res) => {
+    const session = getSession(req);
+    if (session) {
+        destroySession(session.id);
+    }
+    clearSessionCookie(res);
+    const redirectTarget = sanitizeRedirectTarget(req.body?.redirect || '/login');
+    res.redirect(redirectTarget);
 });
 
 // Demonstrate using the built-in `net` module
