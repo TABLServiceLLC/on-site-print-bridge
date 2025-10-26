@@ -14,7 +14,7 @@ const jwt = require('jsonwebtoken');
 const app = express();
 const PORT = process.env.PORT || 8443;
 const PRINTER_PORT = 9100;
-const { getPrinterIp, setPrinterIp } = require('./printerMap');
+const { getPrinterIp, setPrinterIp, getAllMappings } = require('./printerMap');
 const { scanNetwork, defaultCidrFromInterfaces } = require('./discoverPrinters');
 const DISCOVERY_INTERVAL_MS = parseInt(process.env.DISCOVERY_INTERVAL_MS || '300000', 10); // 5 minutes
 const DISCOVERY_PORTS = [9100, 515, 631, 80, 443];
@@ -196,6 +196,22 @@ app.get('/ui', (req, res) => {
       font-weight: 600;
       margin-right: 6px;
     }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(15, 23, 42, 0.08);
+      color: #0f172a;
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      margin: 0 6px 6px 0;
+    }
+    .chip--assigned {
+      background: rgba(59, 127, 190, 0.18);
+      color: #1e3a5f;
+    }
     .status {
       font-size: 13px;
       color: #475569;
@@ -221,6 +237,12 @@ app.get('/ui', (req, res) => {
     .assign:hover {
       background: rgba(59, 127, 190, 0.12);
       transform: translateY(-1px);
+    }
+    .assigned-cell {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 4px;
     }
     @media (max-width: 720px) {
       .hero {
@@ -267,11 +289,12 @@ app.get('/ui', (req, res) => {
               <th>Ports</th>
               <th>MAC</th>
               <th>Hostname</th>
+              <th>Assigned To</th>
               <th>Assign</th>
             </tr>
           </thead>
           <tbody>
-            <tr><td colspan="5" class="muted">Loading…</td></tr>
+            <tr><td colspan="6" class="muted">Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -285,6 +308,11 @@ app.get('/ui', (req, res) => {
     const summaryEl = $('#summary');
 
     function fmtPorts(ports) { return (ports || []).map(p => '<span class="badge">' + p + '</span>').join(''); }
+    function fmtAssignments(assigned) {
+      const list = Array.isArray(assigned) ? assigned.filter(Boolean) : [];
+      if (!list.length) return '<span class="muted">Unassigned</span>';
+      return list.map(term => '<span class="chip chip--assigned">' + term + '</span>').join('');
+    }
 
     async function loadPrinters(opts={}) {
       statusEl.textContent = 'Fetching printers…';
@@ -293,22 +321,27 @@ app.get('/ui', (req, res) => {
         const res = await fetch('/printers' + q, { headers: { 'Accept': 'application/json' } });
         const data = await res.json();
         const printers = data.printers || [];
+        const totalAssignments = data && data.mappings ? Object.keys(data.mappings).length : 0;
         const rows = printers.map(p => {
           const ip = p.ip || '';
           const mac = p.mac || '';
           const host = p.hostname || '';
           const ports = p.ports || [];
+          const assigned = p.assignedTerminals || [];
           return '<tr>' +
             '<td><code>' + ip + '</code></td>' +
             '<td>' + fmtPorts(ports) + '</td>' +
             '<td>' + (mac ? '<code>' + mac + '</code>' : '') + '</td>' +
             '<td>' + host + '</td>' +
+            '<td><div class="assigned-cell">' + fmtAssignments(assigned) + '</div></td>' +
             '<td><button data-ip="' + ip + '" class="assign">Assign…</button></td>' +
           '</tr>';
         }).join('');
-        tblBody.innerHTML = rows || '<tr><td colspan="5" class="muted">No printers found.</td></tr>';
+        tblBody.innerHTML = rows || '<tr><td colspan="6" class="muted">No printers found.</td></tr>';
         summaryEl.textContent = 'CIDR: ' + (data.cidr || 'n/a') +
-          ' • ' + printers.length + ' printer(s) • Updated: ' +
+          ' • ' + printers.length + ' printer(s)' +
+          ' • ' + totalAssignments + ' assignment' + (totalAssignments === 1 ? '' : 's') +
+          ' • Updated: ' +
           (data.lastUpdated ? new Date(data.lastUpdated).toLocaleString() : 'n/a');
         statusEl.textContent = '';
       } catch (e) {
@@ -324,6 +357,7 @@ app.get('/ui', (req, res) => {
         const res = await fetch('/assign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ terminalId, ip }) });
         const data = await res.json();
         if (res.ok && data && data.ok) {
+          await loadPrinters({});
           statusEl.innerHTML = '<span class="ok">Assigned</span> ' + terminalId + ' → ' + ip;
         } else {
           statusEl.innerHTML = '<span class="err">Assign failed:</span> ' + (data && (data.error || JSON.stringify(data)));
@@ -416,11 +450,30 @@ app.get('/printers', async (req, res) => {
             await runDiscovery(cidr);
         }
         const { cidr, lastUpdated, printers } = discoveryCache;
+        const mappings = getAllMappings();
+        const terminalsByIp = {};
+        Object.entries(mappings || {}).forEach(([terminalId, ip]) => {
+            if (!ip) return;
+            const key = String(ip);
+            if (!terminalsByIp[key]) terminalsByIp[key] = [];
+            terminalsByIp[key].push(String(terminalId));
+        });
+        Object.values(terminalsByIp).forEach((arr) => arr.sort());
+        const printersWithAssignments = (printers || []).map((printer) => ({
+            ...printer,
+            assignedTerminals: terminalsByIp[printer.ip] || [],
+        }));
         if (!lastUpdated) {
             // No discovery has run yet; kick one off but don’t block
             runDiscovery(process.env.SUBNET || defaultCidrFromInterfaces()).catch(() => {});
         }
-        res.json({ cidr, lastUpdated, count: (printers || []).length, printers: printers || [] });
+        res.json({
+            cidr,
+            lastUpdated,
+            count: (printers || []).length,
+            printers: printersWithAssignments,
+            mappings,
+        });
     } catch (err) {
         logger.error('GET /printers failed', { error: err.message });
         res.status(500).json({ error: err.message });
