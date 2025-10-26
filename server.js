@@ -345,7 +345,7 @@ function renderProfilePage({ username = '', error = '', success = '' } = {}) {
       margin: 0 auto;
       background: rgba(248, 251, 255, 0.96);
       border-radius: 22px;
-      padding: 40px 44px;
+      padding: 46px 48px 44px;
       box-shadow: 0 24px 64px rgba(15, 31, 55, 0.35);
     }
     .header {
@@ -378,20 +378,28 @@ function renderProfilePage({ username = '', error = '', success = '' } = {}) {
     }
     input {
       width: 100%;
-      padding: 12px 14px;
-      border-radius: 12px;
-      border: 1px solid rgba(30, 58, 95, 0.2);
+      padding: 13px 16px;
+      border-radius: 14px;
+      border: 1px solid rgba(30, 58, 95, 0.18);
       font-size: 15px;
       transition: border-color 120ms ease, box-shadow 120ms ease;
       background: #fff;
     }
     input:focus {
       outline: none;
-      border-color: rgba(59, 127, 190, 0.8);
+      border-color: rgba(59, 127, 190, 0.85);
       box-shadow: 0 0 0 4px rgba(59, 127, 190, 0.25);
     }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 18px 24px;
+      margin-bottom: 28px;
+    }
     .field {
-      margin-bottom: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
     }
     .helper {
       font-size: 12px;
@@ -421,7 +429,7 @@ function renderProfilePage({ username = '', error = '', success = '' } = {}) {
       border-radius: 12px;
       padding: 12px 14px;
       font-size: 13px;
-      margin-bottom: 22px;
+      margin-bottom: 24px;
       border: 1px solid transparent;
     }
     .alert--error {
@@ -434,6 +442,15 @@ function renderProfilePage({ username = '', error = '', success = '' } = {}) {
       color: #137333;
       border-color: rgba(52, 168, 83, 0.2);
     }
+    .actions {
+      display: flex;
+      justify-content: flex-end;
+    }
+    .header-subtitle {
+      margin: 6px 0 0;
+      font-size: 14px;
+      color: rgba(15, 27, 51, 0.7);
+    }
   </style>
 </head>
 <body>
@@ -442,18 +459,34 @@ function renderProfilePage({ username = '', error = '', success = '' } = {}) {
       <h1 class="title">Edit profile</h1>
       <a class="back-link" href="/ui">← Back to dashboard</a>
     </div>
+    <p class="header-subtitle">Update your display name or change the credentials used to access the bridge.</p>
     ${messageBlock}
-    <form method="POST" action="/profile" novalidate>
-      <div class="field">
-        <label for="profile-username">Username</label>
-        <input type="text" id="profile-username" name="username" autocomplete="username" required value="${safeUsername}" />
+    <form method="POST" action="/profile" autocomplete="off" novalidate>
+      <input type="hidden" name="intent" value="update-profile" />
+      <div class="grid">
+        <div class="field">
+          <label for="profile-username">Username</label>
+          <input type="text" id="profile-username" name="username" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" inputmode="text" required value="${safeUsername}" />
+        </div>
+        <div class="field">
+          <label for="profile-current-password">Current password</label>
+          <input type="password" id="profile-current-password" name="currentPassword" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" required />
+          <p class="helper">Required to verify changes.</p>
+        </div>
+        <div class="field">
+          <label for="profile-password">New password</label>
+          <input type="password" id="profile-password" name="password" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" />
+          <p class="helper">Leave blank to keep your current password.</p>
+        </div>
+        <div class="field">
+          <label for="profile-password-confirm">Confirm new password</label>
+          <input type="password" id="profile-password-confirm" name="passwordConfirm" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" />
+          <p class="helper">Must match the new password.</p>
+        </div>
       </div>
-      <div class="field">
-        <label for="profile-password">New password</label>
-        <input type="password" id="profile-password" name="password" autocomplete="new-password" />
-        <p class="helper">Leave blank to keep the existing password.</p>
+      <div class="actions">
+        <button type="submit">Save changes</button>
       </div>
-      <button type="submit">Save changes</button>
     </form>
   </div>
 </body>
@@ -548,13 +581,39 @@ app.post('/profile', requireUiAuth, (req, res) => {
     }
     const session = getSession(req);
     const submittedUser = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
+    const currentPassword = typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
     const submittedPass = typeof req.body?.password === 'string' ? req.body.password : '';
+    const submittedPassConfirm = typeof req.body?.passwordConfirm === 'string' ? req.body.passwordConfirm : '';
     if (!submittedUser) {
         res.status(400).set('Content-Type', 'text/html');
         res.send(renderProfilePage({ username: state.username, error: 'Username is required.' }));
         return;
     }
-    const nextPassword = submittedPass.length > 0 ? submittedPass : state.password;
+    if (!currentPassword) {
+        res.status(400).set('Content-Type', 'text/html');
+        res.send(renderProfilePage({ username: submittedUser, error: 'Current password is required.' }));
+        return;
+    }
+    if (!constantTimeCompare(currentPassword, state.password)) {
+        res.status(401).set('Content-Type', 'text/html');
+        res.send(renderProfilePage({ username: submittedUser, error: 'Current password is incorrect.' }));
+        return;
+    }
+    let nextPassword = state.password;
+    const wantsPasswordChange = submittedPass.length > 0 || submittedPassConfirm.length > 0;
+    if (wantsPasswordChange) {
+        if (submittedPass.length === 0 || submittedPassConfirm.length === 0) {
+            res.status(400).set('Content-Type', 'text/html');
+            res.send(renderProfilePage({ username: submittedUser, error: 'Enter and confirm the new password.' }));
+            return;
+        }
+        if (submittedPass !== submittedPassConfirm) {
+            res.status(400).set('Content-Type', 'text/html');
+            res.send(renderProfilePage({ username: submittedUser, error: 'New passwords do not match.' }));
+            return;
+        }
+        nextPassword = submittedPass;
+    }
     if (!nextPassword) {
         res.status(400).set('Content-Type', 'text/html');
         res.send(renderProfilePage({ username: submittedUser, error: 'Password is required.' }));
@@ -576,7 +635,7 @@ app.post('/profile', requireUiAuth, (req, res) => {
     setSessionCookie(res, newSessionId);
     res.locals.uiUser = submittedUser;
     res.set('Content-Type', 'text/html');
-    res.send(renderProfilePage({ username: submittedUser, success: 'Profile updated successfully.' }));
+    res.send(renderProfilePage({ username: submittedUser, success: wantsPasswordChange ? 'Profile and password updated successfully.' : 'Profile updated successfully.' }));
 });
 
 // Demonstrate using the built-in `net` module
