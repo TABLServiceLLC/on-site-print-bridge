@@ -39,3 +39,4 @@ cert.pem
 # Local data files
 printerMap.json
 printers.json
+uiCredentials.json

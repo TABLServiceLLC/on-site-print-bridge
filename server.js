@@ -17,14 +17,10 @@ const PORT = process.env.PORT || 8443;
 const PRINTER_PORT = 9100;
 const { getPrinterIp, setPrinterIp, getAllMappings, removePrinterIp } = require('./printerMap');
 const { scanNetwork, defaultCidrFromInterfaces } = require('./discoverPrinters');
+const { readCredentials, writeCredentials, CREDENTIALS_PATH } = require('./uiCredentials');
 const DISCOVERY_INTERVAL_MS = parseInt(process.env.DISCOVERY_INTERVAL_MS || '300000', 10); // 5 minutes
 const DISCOVERY_PORTS = [9100, 515, 631, 80, 443];
 const JWT_SECRET = process.env.JWT_SECRET || '';
-const rawUiUser = process.env.UI_USERNAME;
-const rawUiPass = process.env.UI_PASSWORD;
-const UI_USERNAME = typeof rawUiUser === 'string' ? rawUiUser.trim() : '';
-const UI_PASSWORD = typeof rawUiPass === 'string' ? rawUiPass.trim() : '';
-const UI_AUTH_ENABLED = UI_USERNAME.length > 0 && UI_PASSWORD.length > 0;
 const SESSION_COOKIE_NAME = 'tabl_ui_session';
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const sessions = new Map();
@@ -115,6 +111,35 @@ function constantTimeCompare(a, b) {
     }
 }
 
+function getUiAuthState() {
+    const raw = readCredentials();
+    const username = typeof raw.username === 'string' ? raw.username.trim() : '';
+    const password = typeof raw.password === 'string' ? raw.password : '';
+    return {
+        username,
+        password,
+        enabled: username.length > 0 && password.length > 0,
+    };
+}
+
+function escapeHtmlLite(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function getUserInitials(displayName) {
+    if (typeof displayName !== 'string' || !displayName.trim()) return 'U';
+    const tokens = displayName.trim().split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) return 'U';
+    const first = tokens[0][0];
+    const second = tokens.length > 1 ? tokens[1][0] : (tokens[0][1] || '');
+    return (first + second).toUpperCase();
+}
+
 function sanitizeRedirectTarget(target) {
     if (typeof target !== 'string' || target.length === 0) return '/ui';
     try {
@@ -127,10 +152,13 @@ function sanitizeRedirectTarget(target) {
     }
 }
 
-function renderLoginPage({ redirectTo = '/ui', error = '' } = {}) {
+function renderLoginPage({ redirectTo = '/ui', error = '', credentialPath = CREDENTIALS_PATH } = {}) {
     const errorBlock = error
         ? `<div class="alert"><strong>Login failed.</strong> ${error}</div>`
         : '';
+    const metaBlock = credentialPath
+        ? `<p class="meta">Credentials file: <code>${escapeHtmlLite(credentialPath)}</code></p>`
+        : '<p class="meta">Need help? Contact an admin.</p>';
     return `<!doctype html>
 <html lang="en">
 <head>
@@ -274,14 +302,167 @@ function renderLoginPage({ redirectTo = '/ui', error = '' } = {}) {
       </div>
       <button type="submit">Access Bridge</button>
     </form>
-    <p class="meta">Need help? Check the device configuration file.</p>
+    ${metaBlock}
   </main>
 </body>
 </html>`;
 }
 
+function renderProfilePage({ username = '', error = '', success = '' } = {}) {
+    const safeUsername = escapeHtmlLite(username);
+    const messageBlock = error
+        ? `<div class="alert alert--error"><strong>Update failed.</strong> ${escapeHtmlLite(error)}</div>`
+        : success
+        ? `<div class="alert alert--success">${escapeHtmlLite(success)}</div>`
+        : '';
+    return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TABL Profile</title>
+  <meta name="theme-color" content="#3B7FBE" />
+  <link rel="icon" type="image/x-icon" href="/assets/favicon.ico" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.webp" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.webp" />
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.webp" />
+  <link rel="manifest" href="/assets/site.webmanifest" />
+  <style>
+    :root { color-scheme: light; font-size: 16px; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, Arial, sans-serif;
+      background: radial-gradient(120% 120% at 10% -20%, rgba(59, 127, 190, 0.14), transparent 55%),
+                  radial-gradient(120% 120% at 85% -5%, rgba(15, 27, 51, 0.12), transparent 60%),
+                  linear-gradient(180deg, #0f172a 0%, #1b2f4f 40%, #ffffff 100%);
+      min-height: 100vh;
+      padding: 32px 24px 48px;
+      color: #0f172a;
+    }
+    .container {
+      max-width: 520px;
+      margin: 0 auto;
+      background: rgba(248, 251, 255, 0.96);
+      border-radius: 22px;
+      padding: 40px 44px;
+      box-shadow: 0 24px 64px rgba(15, 31, 55, 0.35);
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 28px;
+    }
+    .title {
+      margin: 0;
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+    .back-link {
+      font-size: 14px;
+      color: #3B7FBE;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .back-link:hover {
+      text-decoration: underline;
+    }
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #1e293b;
+      margin-bottom: 8px;
+    }
+    input {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(30, 58, 95, 0.2);
+      font-size: 15px;
+      transition: border-color 120ms ease, box-shadow 120ms ease;
+      background: #fff;
+    }
+    input:focus {
+      outline: none;
+      border-color: rgba(59, 127, 190, 0.8);
+      box-shadow: 0 0 0 4px rgba(59, 127, 190, 0.25);
+    }
+    .field {
+      margin-bottom: 20px;
+    }
+    .helper {
+      font-size: 12px;
+      color: #64748b;
+      margin-top: 6px;
+    }
+    button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 12px 18px;
+      border: none;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #3B7FBE 0%, #265785 100%);
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 14px 32px rgba(59, 127, 190, 0.45);
+      transition: transform 120ms ease, box-shadow 120ms ease;
+    }
+    button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 16px 36px rgba(59, 127, 190, 0.5);
+    }
+    .alert {
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 13px;
+      margin-bottom: 22px;
+      border: 1px solid transparent;
+    }
+    .alert--error {
+      background: rgba(217, 48, 37, 0.12);
+      color: #b3261e;
+      border-color: rgba(217, 48, 37, 0.2);
+    }
+    .alert--success {
+      background: rgba(52, 168, 83, 0.12);
+      color: #137333;
+      border-color: rgba(52, 168, 83, 0.2);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1 class="title">Edit profile</h1>
+      <a class="back-link" href="/ui">← Back to dashboard</a>
+    </div>
+    ${messageBlock}
+    <form method="POST" action="/profile" novalidate>
+      <div class="field">
+        <label for="profile-username">Username</label>
+        <input type="text" id="profile-username" name="username" autocomplete="username" required value="${safeUsername}" />
+      </div>
+      <div class="field">
+        <label for="profile-password">New password</label>
+        <input type="password" id="profile-password" name="password" autocomplete="new-password" />
+        <p class="helper">Leave blank to keep the existing password.</p>
+      </div>
+      <button type="submit">Save changes</button>
+    </form>
+  </div>
+</body>
+</html>`;
+}
+
 function requireUiAuth(req, res, next) {
-    if (!UI_AUTH_ENABLED) return next();
+    const { enabled } = getUiAuthState();
+    if (!enabled) return next();
     const session = getSession(req);
     if (session) {
         res.locals.uiUser = session.username;
@@ -300,7 +481,8 @@ app.post('/echo', (req, res) => {
 });
 
 app.get('/login', (req, res) => {
-    if (!UI_AUTH_ENABLED) {
+    const state = getUiAuthState();
+    if (!state.enabled) {
         return res.redirect('/ui');
     }
     const session = getSession(req);
@@ -313,7 +495,8 @@ app.get('/login', (req, res) => {
 });
 
 app.post('/login', (req, res) => {
-    if (!UI_AUTH_ENABLED) {
+    const state = getUiAuthState();
+    if (!state.enabled) {
         return res.redirect('/ui');
     }
     const session = getSession(req);
@@ -324,11 +507,11 @@ app.post('/login', (req, res) => {
     const submittedPass = typeof req.body?.password === 'string' ? req.body.password : '';
     const redirectTarget = sanitizeRedirectTarget(req.body?.redirect);
 
-    const userOk = constantTimeCompare(submittedUser, UI_USERNAME);
-    const passOk = constantTimeCompare(submittedPass, UI_PASSWORD);
+    const userOk = constantTimeCompare(submittedUser, state.username);
+    const passOk = constantTimeCompare(submittedPass, state.password);
 
     if (userOk && passOk) {
-        const sessionId = createSession(UI_USERNAME);
+        const sessionId = createSession(state.username);
         setSessionCookie(res, sessionId);
         return res.redirect(redirectTarget);
     }
@@ -349,6 +532,53 @@ app.post('/logout', (req, res) => {
     res.redirect(redirectTarget);
 });
 
+app.get('/profile', requireUiAuth, (req, res) => {
+    const state = getUiAuthState();
+    if (!state.enabled) {
+        return res.redirect('/ui');
+    }
+    res.set('Content-Type', 'text/html');
+    res.send(renderProfilePage({ username: state.username }));
+});
+
+app.post('/profile', requireUiAuth, (req, res) => {
+    const state = getUiAuthState();
+    if (!state.enabled) {
+        return res.redirect('/ui');
+    }
+    const session = getSession(req);
+    const submittedUser = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
+    const submittedPass = typeof req.body?.password === 'string' ? req.body.password : '';
+    if (!submittedUser) {
+        res.status(400).set('Content-Type', 'text/html');
+        res.send(renderProfilePage({ username: state.username, error: 'Username is required.' }));
+        return;
+    }
+    const nextPassword = submittedPass.length > 0 ? submittedPass : state.password;
+    if (!nextPassword) {
+        res.status(400).set('Content-Type', 'text/html');
+        res.send(renderProfilePage({ username: submittedUser, error: 'Password is required.' }));
+        return;
+    }
+    try {
+        writeCredentials({ username: submittedUser, password: nextPassword });
+        logger.info('UI credentials updated', { username: submittedUser });
+    } catch (err) {
+        logger.error('Failed to update UI credentials', { error: err.message || String(err) });
+        res.status(500).set('Content-Type', 'text/html');
+        res.send(renderProfilePage({ username: state.username, error: 'Unable to save credentials. Try again.' }));
+        return;
+    }
+    if (session) {
+        destroySession(session.id);
+    }
+    const newSessionId = createSession(submittedUser);
+    setSessionCookie(res, newSessionId);
+    res.locals.uiUser = submittedUser;
+    res.set('Content-Type', 'text/html');
+    res.send(renderProfilePage({ username: submittedUser, success: 'Profile updated successfully.' }));
+});
+
 // Demonstrate using the built-in `net` module
 app.get('/is-ip/:value', (req, res) => {
     const { value } = req.params;
@@ -360,6 +590,31 @@ app.get('/is-ip/:value', (req, res) => {
 
 // Basic UI to view printers and assign mapping
 app.get('/ui', requireUiAuth, (req, res) => {
+    const authState = getUiAuthState();
+    const signedInUserRaw = typeof res.locals.uiUser === 'string' ? res.locals.uiUser : (authState.enabled ? authState.username : '');
+    const showUserMenu = authState.enabled && Boolean(signedInUserRaw);
+    const sanitizedUserName = escapeHtmlLite(signedInUserRaw);
+    const sanitizedInitials = escapeHtmlLite(getUserInitials(signedInUserRaw));
+    const userMenuHtml = showUserMenu
+        ? `<div class="topbar">
+      <div class="topbar__actions">
+        <div class="user-menu" data-open="false">
+          <button class="user-menu__trigger" type="button" aria-haspopup="true" aria-expanded="false">
+            <span class="user-menu__initials">${sanitizedInitials}</span>
+            <span class="user-menu__name">${sanitizedUserName}</span>
+            <span class="user-menu__caret">&#9662;</span>
+          </button>
+          <div class="user-menu__dropdown" role="menu">
+            <a class="user-menu__link" href="/profile" role="menuitem">Edit profile</a>
+            <form method="POST" action="/logout" role="none">
+              <input type="hidden" name="redirect" value="/login" />
+              <button type="submit" class="user-menu__link user-menu__logout" role="menuitem">Log out</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>`
+        : '';
     const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -391,6 +646,92 @@ app.get('/ui', requireUiAuth, (req, res) => {
       max-width: 1040px;
       margin: 0 auto;
       padding: 48px 24px 64px;
+    }
+    .topbar {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+    .user-menu {
+      position: relative;
+    }
+    .user-menu__trigger {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid rgba(15, 27, 51, 0.12);
+      border-radius: 14px;
+      background: rgba(248, 251, 255, 0.85);
+      padding: 8px 14px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #0f172a;
+      cursor: pointer;
+      box-shadow: 0 10px 26px rgba(15, 31, 55, 0.18);
+      transition: transform 120ms ease, box-shadow 120ms ease;
+    }
+    .user-menu__trigger:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 12px 32px rgba(15, 31, 55, 0.22);
+    }
+    .user-menu__initials {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #3B7FBE 0%, #265785 100%);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .user-menu__caret {
+      font-size: 11px;
+      color: #64748b;
+    }
+    .user-menu__dropdown {
+      position: absolute;
+      top: calc(100% + 10px);
+      right: 0;
+      min-width: 180px;
+      background: #fff;
+      border-radius: 14px;
+      box-shadow: 0 24px 60px rgba(15, 31, 55, 0.26);
+      padding: 8px 0;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-6px);
+      transition: opacity 140ms ease, transform 140ms ease;
+      z-index: 10;
+    }
+    .user-menu.is-open .user-menu__dropdown {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+    .user-menu__dropdown form {
+      margin: 0;
+    }
+    .user-menu__link {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: transparent;
+      border: none;
+      padding: 10px 20px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #1e293b;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .user-menu__link:hover {
+      background: rgba(59, 127, 190, 0.12);
+    }
+    .user-menu__logout {
+      color: #b3261e;
     }
     .hero {
       display: flex;
@@ -605,6 +946,7 @@ app.get('/ui', requireUiAuth, (req, res) => {
  </head>
 <body>
   <div class="page">
+    ${userMenuHtml}
     <header class="hero">
       <img class="hero__logo" src="/assets/TABL_Logo.svg" alt="TABL" />
       <div>
@@ -643,6 +985,33 @@ app.get('/ui', requireUiAuth, (req, res) => {
     const tblBody = $('#tbl tbody');
     const statusEl = $('#status');
     const summaryEl = $('#summary');
+    const userMenuEl = document.querySelector('.user-menu');
+    const userMenuTrigger = userMenuEl ? userMenuEl.querySelector('.user-menu__trigger') : null;
+    const logoutRedirectInput = userMenuEl ? userMenuEl.querySelector('form[action="/logout"] input[name="redirect"]') : null;
+    if (logoutRedirectInput) {
+      const currentPath = (window.location.pathname || '/ui') + (window.location.search || '');
+      logoutRedirectInput.value = encodeURIComponent(currentPath || '/login');
+    }
+    const closeUserMenu = () => {
+      if (!userMenuEl || !userMenuTrigger) return;
+      userMenuEl.classList.remove('is-open');
+      userMenuTrigger.setAttribute('aria-expanded', 'false');
+    };
+    const toggleUserMenu = () => {
+      if (!userMenuEl || !userMenuTrigger) return;
+      const willOpen = !userMenuEl.classList.contains('is-open');
+      if (willOpen) {
+        userMenuEl.classList.add('is-open');
+        userMenuTrigger.setAttribute('aria-expanded', 'true');
+      } else {
+        closeUserMenu();
+      }
+    };
+    if (userMenuEl && userMenuTrigger) {
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') closeUserMenu();
+      });
+    }
 
     function escapeHtml(value) {
       return String(value ?? '')
@@ -747,6 +1116,20 @@ app.get('/ui', requireUiAuth, (req, res) => {
     }
 
     document.addEventListener('click', (ev) => {
+      if (userMenuEl && userMenuTrigger) {
+        const triggerMatch = ev.target.closest('.user-menu__trigger');
+        if (triggerMatch) {
+          ev.preventDefault();
+          toggleUserMenu();
+          return;
+        }
+        const menuItem = ev.target.closest('.user-menu__link');
+        if (menuItem) {
+          closeUserMenu();
+        } else if (userMenuEl.classList.contains('is-open') && !ev.target.closest('.user-menu')) {
+          closeUserMenu();
+        }
+      }
       const removeBtn = ev.target.closest('button.chip__remove');
       if (removeBtn) {
         const terminalIdAttr = removeBtn.getAttribute('data-terminal');
