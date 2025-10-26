@@ -72,7 +72,7 @@ Set in `.env` (defaults shown where applicable):
   - `SUBNET` — CIDR to scan (defaults to inferred interface or `192.168.1.0/24`)
   - `DISCOVERY_INTERVAL_MS` — periodic re-scan interval (default `300000`)
 - Polling (optional)
-  - `PRINT_JOBS_URL` — cloud endpoint for pending jobs (default `https://api.example.com/print-jobs`)
+  - `PRINT_JOBS_URL` — cloud endpoint for pending jobs (leave unset to disable polling)
   - `STORE_ID` — store/site identifier (default `0`)
   - `PRINT_POLL_INTERVAL_MS` — poll interval in ms (default `5000`)
   - Outbound auth header preference:
@@ -122,7 +122,7 @@ Examples:
 ## ⚙️ Behavior
 
 - Discovery runs on startup and every `DISCOVERY_INTERVAL_MS`. Force refresh with `/printers?refresh=true` (JWT).
-- Poller fetches from `PRINT_JOBS_URL?storeId=<STORE_ID>` on an interval and prints using saved mappings.
+- When `PRINT_JOBS_URL` is set, the poller fetches from `PRINT_JOBS_URL?storeId=<STORE_ID>` on an interval and prints using saved mappings.
 - Raw print is sent to the mapped printer on port `9100`.
 - Logs append to `LOG_FILE` (default `bridge.log`).
 

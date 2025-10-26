@@ -364,16 +364,21 @@ function boot() {
     // ----------------------
     // Background print poller
     // ----------------------
-    logger.info('Print poller configured', { PRINT_JOBS_URL, STORE_ID, POLL_INTERVAL_MS, POLL_INSECURE_TLS, POLL_CA_FILE: POLL_CA_FILE || null });
-    setInterval(pollOnce, POLL_INTERVAL_MS);
-    // Kick off immediately
-    setImmediate(pollOnce);
+    if (PRINT_POLL_ENABLED) {
+        logger.info('Print poller configured', { PRINT_JOBS_URL, STORE_ID, POLL_INTERVAL_MS, POLL_INSECURE_TLS, POLL_CA_FILE: POLL_CA_FILE || null });
+        setInterval(pollOnce, POLL_INTERVAL_MS);
+        // Kick off immediately
+        setImmediate(pollOnce);
+    } else {
+        logger.info('Print poller disabled; PRINT_JOBS_URL not set');
+    }
 }
 
 // ----------------------
 // Background print poller config
 // ----------------------
-const PRINT_JOBS_URL = process.env.PRINT_JOBS_URL || 'https://api.example.com/print-jobs';
+const PRINT_JOBS_URL = (process.env.PRINT_JOBS_URL || '').trim();
+const PRINT_POLL_ENABLED = PRINT_JOBS_URL.length > 0;
 const STORE_ID = process.env.STORE_ID || '0';
 const POLL_INTERVAL_MS = parseInt(process.env.PRINT_POLL_INTERVAL_MS || '5000', 10);
 // Outbound auth preference: JWT (JWT_TOKEN or POLL_JWT), fallback to API_TOKEN
@@ -383,25 +388,28 @@ const POLL_INSECURE_TLS = ['1','true','yes','on'].includes(String(process.env.PR
 const POLL_CA_FILE = process.env.PRINT_POLL_CA_FILE || '';
 
 async function fetchPendingPrintJobs() {
-    try {
-    const headers = {};
-    if (OUTBOUND_JWT) headers['Authorization'] = `Bearer ${OUTBOUND_JWT}`;
-    else if (API_TOKEN) headers['Authorization'] = `Bearer ${API_TOKEN}`;
-    let httpsAgent;
-    try {
-      const agentOpts = {};
-      if (POLL_INSECURE_TLS) agentOpts.rejectUnauthorized = false;
-      if (POLL_CA_FILE && fs.existsSync(POLL_CA_FILE)) agentOpts.ca = fs.readFileSync(POLL_CA_FILE);
-      if (Object.keys(agentOpts).length) httpsAgent = new https.Agent(agentOpts);
-    } catch (e) {
-      logger.warn('Poller HTTPS agent setup failed', { error: e.message });
+    if (!PRINT_POLL_ENABLED) {
+        return [];
     }
-    const resp = await axios.get(PRINT_JOBS_URL, {
-        params: { storeId: STORE_ID },
-        headers,
-        httpsAgent,
-        timeout: 8000,
-    });
+    try {
+        const headers = {};
+        if (OUTBOUND_JWT) headers['Authorization'] = `Bearer ${OUTBOUND_JWT}`;
+        else if (API_TOKEN) headers['Authorization'] = `Bearer ${API_TOKEN}`;
+        let httpsAgent;
+        try {
+            const agentOpts = {};
+            if (POLL_INSECURE_TLS) agentOpts.rejectUnauthorized = false;
+            if (POLL_CA_FILE && fs.existsSync(POLL_CA_FILE)) agentOpts.ca = fs.readFileSync(POLL_CA_FILE);
+            if (Object.keys(agentOpts).length) httpsAgent = new https.Agent(agentOpts);
+        } catch (e) {
+            logger.warn('Poller HTTPS agent setup failed', { error: e.message });
+        }
+        const resp = await axios.get(PRINT_JOBS_URL, {
+            params: { storeId: STORE_ID },
+            headers,
+            httpsAgent,
+            timeout: 8000,
+        });
         const data = resp && resp.data;
         if (!data) return [];
         // Accept either { jobs: [...] } or [...] directly
@@ -450,6 +458,7 @@ async function processPrintJob(job) {
 
 let pollInFlight = false;
 async function pollOnce() {
+    if (!PRINT_POLL_ENABLED) return;
     if (pollInFlight) return;
     pollInFlight = true;
     try {
