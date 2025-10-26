@@ -78,9 +78,22 @@ function setPrinterIp(terminalId, ip) {
   return map;
 }
 
+function removePrinterIp(terminalId) {
+  if (!terminalId) throw new Error('terminalId is required');
+  const map = readMap();
+  const key = String(terminalId);
+  const existing = Object.prototype.hasOwnProperty.call(map, key) ? map[key] : undefined;
+  if (existing !== undefined) {
+    delete map[key];
+    writeMap(map);
+  }
+  return { map, removedIp: existing };
+}
+
 module.exports = {
   MAP_PATH,
   getAllMappings,
   getPrinterIp,
   setPrinterIp,
+  removePrinterIp,
 };

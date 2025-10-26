@@ -14,7 +14,7 @@ const jwt = require('jsonwebtoken');
 const app = express();
 const PORT = process.env.PORT || 8443;
 const PRINTER_PORT = 9100;
-const { getPrinterIp, setPrinterIp, getAllMappings } = require('./printerMap');
+const { getPrinterIp, setPrinterIp, getAllMappings, removePrinterIp } = require('./printerMap');
 const { scanNetwork, defaultCidrFromInterfaces } = require('./discoverPrinters');
 const DISCOVERY_INTERVAL_MS = parseInt(process.env.DISCOVERY_INTERVAL_MS || '300000', 10); // 5 minutes
 const DISCOVERY_PORTS = [9100, 515, 631, 80, 443];
@@ -212,6 +212,28 @@ app.get('/ui', (req, res) => {
       background: rgba(59, 127, 190, 0.18);
       color: #1e3a5f;
     }
+    .chip__remove {
+      border: none;
+      background: transparent;
+      color: inherit;
+      margin-left: 8px;
+      padding: 0;
+      font-size: 16px;
+      line-height: 1;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      transition: color 120ms ease;
+    }
+    .chip__remove:hover {
+      color: #d93025;
+    }
+    .chip__remove:focus-visible {
+      outline: 2px solid rgba(217, 48, 37, 0.4);
+      outline-offset: 2px;
+    }
     .status {
       font-size: 13px;
       color: #475569;
@@ -307,11 +329,26 @@ app.get('/ui', (req, res) => {
     const statusEl = $('#status');
     const summaryEl = $('#summary');
 
-    function fmtPorts(ports) { return (ports || []).map(p => '<span class="badge">' + p + '</span>').join(''); }
-    function fmtAssignments(assigned) {
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+    function fmtPorts(ports) { return (ports || []).map(p => '<span class="badge">' + escapeHtml(p) + '</span>').join(''); }
+    function fmtAssignments(assigned, ip) {
       const list = Array.isArray(assigned) ? assigned.filter(Boolean) : [];
       if (!list.length) return '<span class="muted">Unassigned</span>';
-      return list.map(term => '<span class="chip chip--assigned">' + term + '</span>').join('');
+      const safeIp = escapeHtml(ip || '');
+      return list.map(term => {
+        const safeTerm = escapeHtml(term);
+        return '<span class="chip chip--assigned">' +
+          safeTerm +
+          '<button type="button" class="chip__remove" data-terminal="' + safeTerm + '" data-ip="' + safeIp + '" aria-label="Remove assignment for ' + safeTerm + '">×</button>' +
+        '</span>';
+      }).join('');
     }
 
     async function loadPrinters(opts={}) {
@@ -328,13 +365,16 @@ app.get('/ui', (req, res) => {
           const host = p.hostname || '';
           const ports = p.ports || [];
           const assigned = p.assignedTerminals || [];
+          const safeIp = escapeHtml(ip);
+          const safeMac = escapeHtml(mac);
+          const safeHost = escapeHtml(host);
           return '<tr>' +
-            '<td><code>' + ip + '</code></td>' +
+            '<td><code>' + safeIp + '</code></td>' +
             '<td>' + fmtPorts(ports) + '</td>' +
-            '<td>' + (mac ? '<code>' + mac + '</code>' : '') + '</td>' +
-            '<td>' + host + '</td>' +
-            '<td><div class="assigned-cell">' + fmtAssignments(assigned) + '</div></td>' +
-            '<td><button data-ip="' + ip + '" class="assign">Assign…</button></td>' +
+            '<td>' + (mac ? '<code>' + safeMac + '</code>' : '') + '</td>' +
+            '<td>' + safeHost + '</td>' +
+            '<td><div class="assigned-cell">' + fmtAssignments(assigned, ip) + '</div></td>' +
+            '<td><button data-ip="' + safeIp + '" class="assign">Assign…</button></td>' +
           '</tr>';
         }).join('');
         tblBody.innerHTML = rows || '<tr><td colspan="6" class="muted">No printers found.</td></tr>';
@@ -350,24 +390,59 @@ app.get('/ui', (req, res) => {
     }
 
     async function assign(ip) {
-      const terminalId = prompt('Enter terminalId to assign to ' + ip + ':');
+      const ipStr = String(ip || '').trim();
+      const terminalIdInput = prompt('Enter terminalId to assign to ' + ipStr + ':');
+      if (!terminalIdInput) return;
+      const terminalId = terminalIdInput.trim();
       if (!terminalId) return;
       statusEl.textContent = 'Assigning…';
       try {
-        const res = await fetch('/assign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ terminalId, ip }) });
+        const res = await fetch('/assign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ terminalId, ip: ipStr }) });
         const data = await res.json();
         if (res.ok && data && data.ok) {
           await loadPrinters({});
-          statusEl.innerHTML = '<span class="ok">Assigned</span> ' + terminalId + ' → ' + ip;
+          statusEl.innerHTML = '<span class="ok">Assigned</span> ' + escapeHtml(terminalId) + ' → ' + escapeHtml(ipStr);
         } else {
-          statusEl.innerHTML = '<span class="err">Assign failed:</span> ' + (data && (data.error || JSON.stringify(data)));
+          const message = data && (data.error || JSON.stringify(data));
+          statusEl.innerHTML = '<span class="err">Assign failed:</span> ' + escapeHtml(message || 'Unknown error');
         }
       } catch (e) {
-        statusEl.innerHTML = '<span class="err">Assign error:</span> ' + e.message;
+        statusEl.innerHTML = '<span class="err">Assign error:</span> ' + escapeHtml(e.message || String(e));
+      }
+    }
+
+    async function unassign(terminalId) {
+      if (!terminalId) return;
+      const id = String(terminalId).trim();
+      if (!id) return;
+      statusEl.textContent = 'Removing assignment…';
+      try {
+        const res = await fetch('/assign/' + encodeURIComponent(id), { method: 'DELETE', headers: { 'Accept': 'application/json' } });
+        const data = await res.json();
+        if (res.ok && data && data.ok) {
+          await loadPrinters({});
+          statusEl.innerHTML = '<span class="ok">Unassigned</span> ' + escapeHtml(id);
+        } else {
+          const message = data && (data.error || JSON.stringify(data));
+          statusEl.innerHTML = '<span class="err">Unassign failed:</span> ' + escapeHtml(message || 'Unknown error');
+        }
+      } catch (e) {
+        statusEl.innerHTML = '<span class="err">Unassign error:</span> ' + escapeHtml(e.message || String(e));
       }
     }
 
     document.addEventListener('click', (ev) => {
+      const removeBtn = ev.target.closest('button.chip__remove');
+      if (removeBtn) {
+        const terminalIdAttr = removeBtn.getAttribute('data-terminal');
+        if (terminalIdAttr) {
+          const trimmedId = terminalIdAttr.trim();
+          if (trimmedId && window.confirm('Remove assignment for ' + trimmedId + '?')) {
+            unassign(trimmedId);
+          }
+        }
+        return;
+      }
       const btn = ev.target.closest('button.assign');
       if (btn) assign(btn.getAttribute('data-ip'));
     });
@@ -399,6 +474,24 @@ app.post('/assign', authenticateToken, async (req, res) => {
         return res.json({ ok: true, terminalId: String(terminalId), ip: String(ip), mappings: map });
     } catch (err) {
         logger.error('Failed to assign printer mapping', { error: err.message || String(err), terminalId });
+        return res.status(500).json({ ok: false, error: err.message || String(err) });
+    }
+});
+
+app.delete('/assign/:terminalId', authenticateToken, async (req, res) => {
+    const { terminalId } = req.params || {};
+    if (!terminalId) {
+        return res.status(400).json({ error: 'terminalId is required' });
+    }
+    try {
+        const { map, removedIp } = removePrinterIp(String(terminalId));
+        if (removedIp === undefined) {
+            return res.status(404).json({ error: 'No assignment found for terminalId', terminalId });
+        }
+        logger.info('Printer mapping removed', { terminalId: String(terminalId), ip: removedIp });
+        return res.json({ ok: true, terminalId: String(terminalId), removedIp, mappings: map });
+    } catch (err) {
+        logger.error('Failed to remove printer mapping', { error: err.message || String(err), terminalId });
         return res.status(500).json({ ok: false, error: err.message || String(err) });
     }
 });
