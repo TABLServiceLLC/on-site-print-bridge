@@ -25,8 +25,51 @@ const SESSION_COOKIE_NAME = 'tabl_ui_session';
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const sessions = new Map();
 
+const DEFAULT_ALLOWED_ORIGINS = ['https://pos.tabl.page', 'http://localhost:8080'];
+
+function normalizeOrigin(value) {
+    if (!value || typeof value !== 'string') return '';
+    try {
+        const parsed = new URL(value);
+        return `${parsed.protocol}//${parsed.host}`.toLowerCase();
+    } catch (_) {
+        return value.replace(/\/+$/, '').toLowerCase();
+    }
+}
+
+function loadAllowedOrigins() {
+    const envList = (process.env.CORS_ALLOWED_ORIGINS || '')
+        .split(/[\s,]+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+    const merged = [...DEFAULT_ALLOWED_ORIGINS, ...envList];
+    const unique = Array.from(new Set(merged.map(normalizeOrigin))).filter(Boolean);
+    return unique;
+}
+
+const ALLOWED_ORIGINS = loadAllowedOrigins();
+logger.info('CORS origins configured', { allowedOrigins: ALLOWED_ORIGINS });
+
+const corsOptions = {
+    origin(origin, callback) {
+        if (!origin) return callback(null, true);
+        const normalized = normalizeOrigin(origin);
+        if (ALLOWED_ORIGINS.includes(normalized)) {
+            return callback(null, true);
+        }
+        logger.warn('Blocked CORS origin', { origin, normalized });
+        return callback(new Error('Not allowed by CORS'));
+    },
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    credentials: true,
+    maxAge: 86400,
+    optionsSuccessStatus: 204,
+};
+
 // Middleware
-app.use(cors());
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
@@ -746,7 +789,7 @@ app.post('/profile', requireUiAuth, (req, res) => {
     if (intent === 'update-username') {
         const targetUsername = submittedUser;
         if (!targetUsername) {
-            return respond({ status: 400, username: state.username, error: 'Username is required.' });
+            return respond({ status: 400, username: '', error: 'Username is required.' });
         }
         if (!state.password) {
             return respond({ status: 500, username: state.username, error: 'Password missing from credentials store.' });
@@ -756,7 +799,7 @@ app.post('/profile', requireUiAuth, (req, res) => {
             logger.info('UI username updated', { username: targetUsername });
         } catch (err) {
             logger.error('Failed to update UI username', { error: err.message || String(err) });
-            return respond({ status: 500, username: state.username, error: 'Unable to save username. Try again.' });
+            return respond({ status: 500, username: targetUsername || state.username, error: 'Unable to save username. Try again.' });
         }
         if (session) {
             destroySession(session.id);
