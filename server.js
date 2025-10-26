@@ -152,13 +152,10 @@ function sanitizeRedirectTarget(target) {
     }
 }
 
-function renderLoginPage({ redirectTo = '/ui', error = '', credentialPath = CREDENTIALS_PATH } = {}) {
+function renderLoginPage({ redirectTo = '/ui', error = '' } = {}) {
     const errorBlock = error
         ? `<div class="alert"><strong>Login failed.</strong> ${error}</div>`
         : '';
-    const metaBlock = credentialPath
-        ? `<p class="meta">Credentials file: <code>${escapeHtmlLite(credentialPath)}</code></p>`
-        : '<p class="meta">Need help? Contact an admin.</p>';
     return `<!doctype html>
 <html lang="en">
 <head>
@@ -302,7 +299,7 @@ function renderLoginPage({ redirectTo = '/ui', error = '', credentialPath = CRED
       </div>
       <button type="submit">Access Bridge</button>
     </form>
-    ${metaBlock}
+    <p class="meta">Need access? Contact your device administrator.</p>
   </main>
 </body>
 </html>`;
@@ -311,9 +308,9 @@ function renderLoginPage({ redirectTo = '/ui', error = '', credentialPath = CRED
 function renderProfilePage({ username = '', error = '', success = '' } = {}) {
     const safeUsername = escapeHtmlLite(username);
     const messageBlock = error
-        ? `<div class="alert alert--error"><strong>Update failed.</strong> ${escapeHtmlLite(error)}</div>`
+        ? `<div class="notice notice--error"><strong>Update failed.</strong> ${escapeHtmlLite(error)}</div>`
         : success
-        ? `<div class="alert alert--success">${escapeHtmlLite(success)}</div>`
+        ? `<div class="notice notice--success">${escapeHtmlLite(success)}</div>`
         : '';
     return `<!doctype html>
 <html lang="en">
@@ -333,35 +330,35 @@ function renderProfilePage({ username = '', error = '', success = '' } = {}) {
     body {
       margin: 0;
       font-family: -apple-system, system-ui, Segoe UI, Roboto, Arial, sans-serif;
-      background: radial-gradient(120% 120% at 10% -20%, rgba(59, 127, 190, 0.14), transparent 55%),
-                  radial-gradient(120% 120% at 85% -5%, rgba(15, 27, 51, 0.12), transparent 60%),
-                  linear-gradient(180deg, #0f172a 0%, #1b2f4f 40%, #ffffff 100%);
+      background: radial-gradient(120% 120% at 12% -18%, rgba(59, 127, 190, 0.14), transparent 55%),
+                  radial-gradient(120% 120% at 88% -10%, rgba(15, 27, 51, 0.12), transparent 60%),
+                  linear-gradient(180deg, #0f172a 0%, #1b2f4f 45%, #ffffff 100%);
       min-height: 100vh;
-      padding: 32px 24px 48px;
+      padding: 24px;
       color: #0f172a;
     }
     .container {
-      max-width: 520px;
+      max-width: 480px;
       margin: 0 auto;
       background: rgba(248, 251, 255, 0.96);
-      border-radius: 22px;
-      padding: 46px 48px 44px;
-      box-shadow: 0 24px 64px rgba(15, 31, 55, 0.35);
+      border-radius: 20px;
+      padding: 32px 34px;
+      box-shadow: 0 22px 52px rgba(15, 31, 55, 0.32);
     }
     .header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 28px;
+      margin-bottom: 18px;
     }
     .title {
       margin: 0;
-      font-size: 26px;
+      font-size: 24px;
       font-weight: 700;
       letter-spacing: -0.01em;
     }
     .back-link {
-      font-size: 14px;
+      font-size: 13px;
       color: #3B7FBE;
       text-decoration: none;
       font-weight: 600;
@@ -369,87 +366,115 @@ function renderProfilePage({ username = '', error = '', success = '' } = {}) {
     .back-link:hover {
       text-decoration: underline;
     }
+    .header-subtitle {
+      margin: 0 0 18px;
+      font-size: 13px;
+      color: rgba(15, 27, 51, 0.7);
+    }
+    .notice {
+      border-radius: 12px;
+      padding: 11px 14px;
+      font-size: 13px;
+      margin-bottom: 18px;
+      border: 1px solid transparent;
+    }
+    .notice--error {
+      background: rgba(217, 48, 37, 0.12);
+      color: #b3261e;
+      border-color: rgba(217, 48, 37, 0.2);
+    }
+    .notice--success {
+      background: rgba(52, 168, 83, 0.12);
+      color: #137333;
+      border-color: rgba(52, 168, 83, 0.2);
+    }
+    .section {
+      border: 1px solid rgba(15, 31, 55, 0.08);
+      border-radius: 16px;
+      padding: 18px 20px;
+      background: rgba(255, 255, 255, 0.98);
+      margin-bottom: 16px;
+    }
+    .section:last-of-type {
+      margin-bottom: 0;
+    }
+    .section__header {
+      margin-bottom: 12px;
+    }
+    .section__title {
+      margin: 0;
+      font-size: 17px;
+      font-weight: 700;
+      color: #102542;
+    }
+    .section__subtitle {
+      margin: 6px 0 0;
+      font-size: 12px;
+      color: #64748b;
+    }
+    form {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
     label {
       display: block;
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 600;
       color: #1e293b;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
     input {
       width: 100%;
-      padding: 13px 16px;
-      border-radius: 14px;
-      border: 1px solid rgba(30, 58, 95, 0.18);
-      font-size: 15px;
+      padding: 11px 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(30, 58, 95, 0.16);
+      font-size: 14px;
       transition: border-color 120ms ease, box-shadow 120ms ease;
       background: #fff;
     }
     input:focus {
       outline: none;
       border-color: rgba(59, 127, 190, 0.85);
-      box-shadow: 0 0 0 4px rgba(59, 127, 190, 0.25);
-    }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 18px 24px;
-      margin-bottom: 28px;
-    }
-    .field {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
+      box-shadow: 0 0 0 3px rgba(59, 127, 190, 0.25);
     }
     .helper {
-      font-size: 12px;
-      color: #64748b;
-      margin-top: 6px;
-    }
-    button {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 12px 18px;
-      border: none;
-      border-radius: 12px;
-      background: linear-gradient(135deg, #3B7FBE 0%, #265785 100%);
-      color: #fff;
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-      box-shadow: 0 14px 32px rgba(59, 127, 190, 0.45);
-      transition: transform 120ms ease, box-shadow 120ms ease;
-    }
-    button:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 16px 36px rgba(59, 127, 190, 0.5);
-    }
-    .alert {
-      border-radius: 12px;
-      padding: 12px 14px;
-      font-size: 13px;
-      margin-bottom: 24px;
-      border: 1px solid transparent;
-    }
-    .alert--error {
-      background: rgba(217, 48, 37, 0.12);
-      color: #b3261e;
-      border-color: rgba(217, 48, 37, 0.2);
-    }
-    .alert--success {
-      background: rgba(52, 168, 83, 0.12);
-      color: #137333;
-      border-color: rgba(52, 168, 83, 0.2);
+      font-size: 11px;
+      color: #94a3b8;
+      margin-top: 4px;
     }
     .actions {
       display: flex;
       justify-content: flex-end;
     }
-    .header-subtitle {
-      margin: 6px 0 0;
+    button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 18px;
+      border: none;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #3B7FBE 0%, #265785 100%);
+      color: #fff;
       font-size: 14px;
-      color: rgba(15, 27, 51, 0.7);
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      cursor: pointer;
+      box-shadow: 0 10px 26px rgba(59, 127, 190, 0.38);
+      transition: transform 120ms ease, box-shadow 120ms ease;
+    }
+    button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 12px 30px rgba(59, 127, 190, 0.42);
+    }
+    @media (max-width: 520px) {
+      .container {
+        padding: 28px 22px;
+      }
+      .section {
+        padding: 16px;
+      }
     }
   </style>
 </head>
@@ -457,37 +482,56 @@ function renderProfilePage({ username = '', error = '', success = '' } = {}) {
   <div class="container">
     <div class="header">
       <h1 class="title">Edit profile</h1>
-      <a class="back-link" href="/ui">← Back to dashboard</a>
+      <a class="back-link" href="/ui">← Back</a>
     </div>
-    <p class="header-subtitle">Update your display name or change the credentials used to access the bridge.</p>
+    <p class="header-subtitle">Manage the credentials for this bridge device.</p>
     ${messageBlock}
-    <form method="POST" action="/profile" autocomplete="off" novalidate>
-      <input type="hidden" name="intent" value="update-profile" />
-      <div class="grid">
-        <div class="field">
+    <section class="section">
+      <header class="section__header">
+        <h2 class="section__title">Username</h2>
+        <p class="section__subtitle">Update the name shown in the bridge dashboard.</p>
+      </header>
+      <form method="POST" action="/profile" autocomplete="off" novalidate>
+        <input type="hidden" name="intent" value="update-username" />
+        <div>
           <label for="profile-username">Username</label>
           <input type="text" id="profile-username" name="username" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" inputmode="text" required value="${safeUsername}" />
         </div>
-        <div class="field">
-          <label for="profile-current-password">Current password</label>
-          <input type="password" id="profile-current-password" name="currentPassword" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" required />
-          <p class="helper">Required to verify changes.</p>
+        <div>
+          <label for="profile-current-password-username">Current password</label>
+          <input type="password" id="profile-current-password-username" name="currentPassword" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" required />
+          <p class="helper">Required to confirm this change.</p>
         </div>
-        <div class="field">
+        <div class="actions">
+          <button type="submit">Save username</button>
+        </div>
+      </form>
+    </section>
+    <section class="section">
+      <header class="section__header">
+        <h2 class="section__title">Password</h2>
+        <p class="section__subtitle">Choose a strong password to guard printer access.</p>
+      </header>
+      <form method="POST" action="/profile" autocomplete="off" novalidate>
+        <input type="hidden" name="intent" value="update-password" />
+        <div>
+          <label for="profile-current-password-password">Current password</label>
+          <input type="password" id="profile-current-password-password" name="currentPassword" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" required />
+        </div>
+        <div>
           <label for="profile-password">New password</label>
-          <input type="password" id="profile-password" name="password" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" />
-          <p class="helper">Leave blank to keep your current password.</p>
+          <input type="password" id="profile-password" name="password" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" required />
         </div>
-        <div class="field">
+        <div>
           <label for="profile-password-confirm">Confirm new password</label>
-          <input type="password" id="profile-password-confirm" name="passwordConfirm" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" />
-          <p class="helper">Must match the new password.</p>
+          <input type="password" id="profile-password-confirm" name="passwordConfirm" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" required />
+          <p class="helper">Both entries must match exactly.</p>
         </div>
-      </div>
-      <div class="actions">
-        <button type="submit">Save changes</button>
-      </div>
-    </form>
+        <div class="actions">
+          <button type="submit">Update password</button>
+        </div>
+      </form>
+    </section>
   </div>
 </body>
 </html>`;
@@ -580,62 +624,74 @@ app.post('/profile', requireUiAuth, (req, res) => {
         return res.redirect('/ui');
     }
     const session = getSession(req);
+    const intent = typeof req.body?.intent === 'string' ? req.body.intent : '';
     const submittedUser = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
     const currentPassword = typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
-    const submittedPass = typeof req.body?.password === 'string' ? req.body.password : '';
-    const submittedPassConfirm = typeof req.body?.passwordConfirm === 'string' ? req.body.passwordConfirm : '';
-    if (!submittedUser) {
-        res.status(400).set('Content-Type', 'text/html');
-        res.send(renderProfilePage({ username: state.username, error: 'Username is required.' }));
-        return;
-    }
-    if (!currentPassword) {
-        res.status(400).set('Content-Type', 'text/html');
-        res.send(renderProfilePage({ username: submittedUser, error: 'Current password is required.' }));
-        return;
-    }
-    if (!constantTimeCompare(currentPassword, state.password)) {
-        res.status(401).set('Content-Type', 'text/html');
-        res.send(renderProfilePage({ username: submittedUser, error: 'Current password is incorrect.' }));
-        return;
-    }
-    let nextPassword = state.password;
-    const wantsPasswordChange = submittedPass.length > 0 || submittedPassConfirm.length > 0;
-    if (wantsPasswordChange) {
-        if (submittedPass.length === 0 || submittedPassConfirm.length === 0) {
-            res.status(400).set('Content-Type', 'text/html');
-            res.send(renderProfilePage({ username: submittedUser, error: 'Enter and confirm the new password.' }));
-            return;
+    const newPassword = typeof req.body?.password === 'string' ? req.body.password : '';
+    const confirmPassword = typeof req.body?.passwordConfirm === 'string' ? req.body.passwordConfirm : '';
+
+    const respond = ({ status = 200, username = state.username, error, success }) => {
+        res.status(status).set('Content-Type', 'text/html');
+        res.send(renderProfilePage({ username, error, success }));
+    };
+
+    if (intent === 'update-username') {
+        const targetUsername = submittedUser;
+        if (!targetUsername) {
+            return respond({ status: 400, username: '', error: 'Username is required.' });
         }
-        if (submittedPass !== submittedPassConfirm) {
-            res.status(400).set('Content-Type', 'text/html');
-            res.send(renderProfilePage({ username: submittedUser, error: 'New passwords do not match.' }));
-            return;
+        if (!currentPassword) {
+            return respond({ status: 400, username: targetUsername, error: 'Current password is required.' });
         }
-        nextPassword = submittedPass;
+        if (!constantTimeCompare(currentPassword, state.password)) {
+            return respond({ status: 401, username: targetUsername, error: 'Current password is incorrect.' });
+        }
+        try {
+            writeCredentials({ username: targetUsername, password: state.password });
+            logger.info('UI username updated', { username: targetUsername });
+        } catch (err) {
+            logger.error('Failed to update UI username', { error: err.message || String(err) });
+            return respond({ status: 500, username: state.username, error: 'Unable to save username. Try again.' });
+        }
+        if (session) {
+            destroySession(session.id);
+        }
+        const newSessionId = createSession(targetUsername);
+        setSessionCookie(res, newSessionId);
+        res.locals.uiUser = targetUsername;
+        return respond({ username: targetUsername, success: 'Username updated.' });
     }
-    if (!nextPassword) {
-        res.status(400).set('Content-Type', 'text/html');
-        res.send(renderProfilePage({ username: submittedUser, error: 'Password is required.' }));
-        return;
+
+    if (intent === 'update-password') {
+        if (!currentPassword) {
+            return respond({ status: 400, username: state.username, error: 'Current password is required.' });
+        }
+        if (!constantTimeCompare(currentPassword, state.password)) {
+            return respond({ status: 401, username: state.username, error: 'Current password is incorrect.' });
+        }
+        if (!newPassword || !confirmPassword) {
+            return respond({ status: 400, username: state.username, error: 'Enter and confirm the new password.' });
+        }
+        if (newPassword !== confirmPassword) {
+            return respond({ status: 400, username: state.username, error: 'New passwords do not match.' });
+        }
+        try {
+            writeCredentials({ username: state.username, password: newPassword });
+            logger.info('UI password updated', { username: state.username });
+        } catch (err) {
+            logger.error('Failed to update UI password', { error: err.message || String(err) });
+            return respond({ status: 500, username: state.username, error: 'Unable to save password. Try again.' });
+        }
+        if (session) {
+            destroySession(session.id);
+        }
+        const newSessionId = createSession(state.username);
+        setSessionCookie(res, newSessionId);
+        res.locals.uiUser = state.username;
+        return respond({ username: state.username, success: 'Password updated.' });
     }
-    try {
-        writeCredentials({ username: submittedUser, password: nextPassword });
-        logger.info('UI credentials updated', { username: submittedUser });
-    } catch (err) {
-        logger.error('Failed to update UI credentials', { error: err.message || String(err) });
-        res.status(500).set('Content-Type', 'text/html');
-        res.send(renderProfilePage({ username: state.username, error: 'Unable to save credentials. Try again.' }));
-        return;
-    }
-    if (session) {
-        destroySession(session.id);
-    }
-    const newSessionId = createSession(submittedUser);
-    setSessionCookie(res, newSessionId);
-    res.locals.uiUser = submittedUser;
-    res.set('Content-Type', 'text/html');
-    res.send(renderProfilePage({ username: submittedUser, success: wantsPasswordChange ? 'Profile and password updated successfully.' : 'Profile updated successfully.' }));
+
+    return respond({ status: 400, username: state.username, error: 'Unsupported action.' });
 });
 
 // Demonstrate using the built-in `net` module
