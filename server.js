@@ -18,6 +18,15 @@ const PRINTER_PORT = 9100;
 const { getPrinterIp, setPrinterIp, getAllMappings, removePrinterIp } = require('./printerMap');
 const { scanNetwork, defaultCidrFromInterfaces } = require('./discoverPrinters');
 const { readCredentials, writeCredentials, CREDENTIALS_PATH } = require('./uiCredentials');
+const {
+    getAllLabels,
+    getAllPrinterLabels,
+    getAllTerminalLabels,
+    setPrinterLabel,
+    removePrinterLabel,
+    setTerminalLabel,
+    removeTerminalLabel,
+} = require('./printerLabels');
 const DISCOVERY_INTERVAL_MS = parseInt(process.env.DISCOVERY_INTERVAL_MS || '300000', 10); // 5 minutes
 const DISCOVERY_PORTS = [9100, 515, 631, 80, 443];
 const JWT_SECRET = process.env.JWT_SECRET || '';
@@ -521,6 +530,32 @@ function renderProfilePage({ username = '', error = '', success = '' } = {}) {
       transform: translateY(-1px);
       box-shadow: 0 12px 30px rgba(59, 127, 190, 0.42);
     }
+    .label-cell {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .label-cell__value {
+      font-weight: 600;
+      color: #102542;
+    }
+    .label-cell__actions {
+      display: flex;
+      gap: 6px;
+    }
+    .label-cell__actions button {
+      padding: 6px 10px;
+      font-size: 12px;
+      border-radius: 8px;
+      box-shadow: none;
+      background: rgba(59, 127, 190, 0.12);
+      color: #1e3a5f;
+    }
+    .label-cell__actions button:hover {
+      transform: none;
+      box-shadow: none;
+      background: rgba(59, 127, 190, 0.18);
+    }
     .modal {
       position: fixed;
       inset: 0;
@@ -706,6 +741,30 @@ function requireUiAuth(req, res, next) {
     return res.redirect(`/login?redirect=${redirectTarget}`);
 }
 
+function authorizeApi(req, res, next) {
+    const header = req.headers['authorization'] || req.headers['Authorization'];
+    if (header && /^Bearer\s+/i.test(header)) {
+        if (!JWT_SECRET) {
+            logger.error('JWT_SECRET not set; rejecting API auth request');
+            return res.status(401).json({ error: 'Unauthorized: server not configured' });
+        }
+        const token = header.split(/\s+/)[1];
+        return jwt.verify(token, JWT_SECRET, (err, payload) => {
+            if (err) {
+                return res.status(401).json({ error: 'Unauthorized: invalid token' });
+            }
+            req.user = payload;
+            return next();
+        });
+    }
+    const session = getSession(req);
+    if (session) {
+        res.locals.uiUser = session.username;
+        return next();
+    }
+    return res.status(401).json({ error: 'Unauthorized' });
+}
+
 app.get('/health', (req, res) => {
     res.json({ status: 'ok' });
 });
@@ -850,6 +909,70 @@ app.post('/profile', requireUiAuth, (req, res) => {
     }
 
     return respond({ status: 400, username: state.username, error: 'Unsupported action.' });
+});
+
+app.get('/printer-labels', authorizeApi, (req, res) => {
+    const { printers } = getAllLabels();
+    res.json({ printers });
+});
+
+app.post('/printer-labels', authorizeApi, (req, res) => {
+    const ip = typeof req.body?.ip === 'string' ? req.body.ip.trim() : '';
+    const rawLabel = typeof req.body?.label === 'string' ? req.body.label : '';
+    if (!ip || net.isIP(ip) === 0) {
+        return res.status(400).json({ error: 'A valid printer IP is required.' });
+    }
+    const label = rawLabel.trim();
+    if (!label) {
+        removePrinterLabel(ip);
+        logger.info('Printer label removed', { ip });
+        return res.json({ ok: true, ip, label: null, printers: getAllPrinterLabels() });
+    }
+    setPrinterLabel(ip, label);
+    logger.info('Printer label updated', { ip, label });
+    return res.json({ ok: true, ip, label, printers: getAllPrinterLabels() });
+});
+
+app.delete('/printer-labels/:ip', authorizeApi, (req, res) => {
+    const ip = typeof req.params?.ip === 'string' ? req.params.ip.trim() : '';
+    if (!ip || net.isIP(ip) === 0) {
+        return res.status(400).json({ error: 'A valid printer IP is required.' });
+    }
+    removePrinterLabel(ip);
+    logger.info('Printer label removed', { ip });
+    res.json({ ok: true, ip, label: null, printers: getAllPrinterLabels() });
+});
+
+app.get('/terminal-labels', authorizeApi, (req, res) => {
+    const { terminals } = getAllLabels();
+    res.json({ terminals });
+});
+
+app.post('/terminal-labels', authorizeApi, (req, res) => {
+    const terminalId = typeof req.body?.terminalId === 'string' ? req.body.terminalId.trim() : '';
+    const rawLabel = typeof req.body?.label === 'string' ? req.body.label : '';
+    if (!terminalId) {
+        return res.status(400).json({ error: 'terminalId is required.' });
+    }
+    const label = rawLabel.trim();
+    if (!label) {
+        removeTerminalLabel(terminalId);
+        logger.info('Terminal label removed', { terminalId });
+        return res.json({ ok: true, terminalId, label: null, terminals: getAllTerminalLabels() });
+    }
+    setTerminalLabel(terminalId, label);
+    logger.info('Terminal label updated', { terminalId, label });
+    res.json({ ok: true, terminalId, label, terminals: getAllTerminalLabels() });
+});
+
+app.delete('/terminal-labels/:terminalId', authorizeApi, (req, res) => {
+    const terminalId = typeof req.params?.terminalId === 'string' ? req.params.terminalId.trim() : '';
+    if (!terminalId) {
+        return res.status(400).json({ error: 'terminalId is required.' });
+    }
+    removeTerminalLabel(terminalId);
+    logger.info('Terminal label removed', { terminalId });
+    res.json({ ok: true, terminalId, label: null, terminals: getAllTerminalLabels() });
 });
 
 // Demonstrate using the built-in `net` module
@@ -1163,6 +1286,41 @@ app.get('/ui', requireUiAuth, (req, res) => {
       outline: 2px solid rgba(217, 48, 37, 0.4);
       outline-offset: 2px;
     }
+    .chip__edit {
+      border: none;
+      background: transparent;
+      color: inherit;
+      margin-left: 6px;
+      padding: 0;
+      font-size: 14px;
+      line-height: 1;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      transition: color 120ms ease;
+    }
+    .chip__edit:hover {
+      color: #1d4ed8;
+    }
+    .chip__edit:focus-visible {
+      outline: 2px solid rgba(29, 78, 216, 0.35);
+      outline-offset: 2px;
+    }
+    .chip__label {
+      font-weight: 600;
+      margin-right: 6px;
+      color: #0f172a;
+    }
+    .chip__id {
+      font-size: 11px;
+      letter-spacing: 0.01em;
+      color: #475569;
+      background: rgba(15, 23, 42, 0.04);
+      border-radius: 999px;
+      padding: 2px 6px;
+    }
     .status {
       font-size: 13px;
       color: #475569;
@@ -1238,6 +1396,7 @@ app.get('/ui', requireUiAuth, (req, res) => {
           <thead>
             <tr>
               <th>IP</th>
+              <th>Label</th>
               <th>Ports</th>
               <th>MAC</th>
               <th>Hostname</th>
@@ -1246,7 +1405,7 @@ app.get('/ui', requireUiAuth, (req, res) => {
             </tr>
           </thead>
           <tbody>
-            <tr><td colspan="6" class="muted">Loading…</td></tr>
+            <tr><td colspan="7" class="muted">Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -1295,14 +1454,36 @@ app.get('/ui', requireUiAuth, (req, res) => {
         .replace(/'/g, '&#39;');
     }
     function fmtPorts(ports) { return (ports || []).map(p => '<span class="badge">' + escapeHtml(p) + '</span>').join(''); }
-    function fmtAssignments(assigned, ip) {
-      const list = Array.isArray(assigned) ? assigned.filter(Boolean) : [];
-      if (!list.length) return '<span class="muted">Unassigned</span>';
-      const safeIp = escapeHtml(ip || '');
-      return list.map(term => {
-        const safeTerm = escapeHtml(term);
+    function fmtPrinterLabel(printer) {
+      const ip = printer.ip || '';
+      const label = printer.label ? printer.label : '';
+      const safeIp = escapeHtml(ip);
+      const safeLabelAttr = escapeHtml(label);
+      const hasLabel = Boolean(label);
+      const labelDisplay = hasLabel ? '<span class="label-cell__value">' + escapeHtml(label) + '</span>' : '<span class="muted">No label</span>';
+      const actions = hasLabel
+        ? '<button type="button" class="label-cell__edit" data-ip="' + safeIp + '" data-label="' + safeLabelAttr + '">Edit label</button>' +
+          '<button type="button" class="label-cell__clear" data-ip="' + safeIp + '">Clear</button>'
+        : '<button type="button" class="label-cell__edit" data-ip="' + safeIp + '" data-label="">Add label</button>';
+      return '<div class="label-cell">' +
+        '<div>' + labelDisplay + '</div>' +
+        '<div class="label-cell__actions">' + actions + '</div>' +
+      '</div>';
+    }
+    function fmtAssignments(printer) {
+      const safeIp = escapeHtml(printer.ip || '');
+      const details = Array.isArray(printer.assignedTerminalDetails) && printer.assignedTerminalDetails.length
+        ? printer.assignedTerminalDetails
+        : (printer.assignedTerminals || []).map((terminalId) => ({ terminalId, label: null }));
+      if (!details.length) return '<span class="muted">Unassigned</span>';
+      return details.map((det) => {
+        const safeTerm = escapeHtml(det.terminalId || '');
+        const safeLabelAttr = det.label ? escapeHtml(det.label) : '';
+        const labelMarkup = det.label ? '<span class="chip__label">' + escapeHtml(det.label) + '</span>' : '';
+        const idMarkup = '<span class="chip__id">' + safeTerm + '</span>';
         return '<span class="chip chip--assigned">' +
-          safeTerm +
+          labelMarkup + idMarkup +
+          '<button type="button" class="chip__edit" data-terminal="' + safeTerm + '" data-label="' + safeLabelAttr + '">✎</button>' +
           '<button type="button" class="chip__remove" data-terminal="' + safeTerm + '" data-ip="' + safeIp + '" aria-label="Remove assignment for ' + safeTerm + '">×</button>' +
         '</span>';
       }).join('');
@@ -1321,20 +1502,21 @@ app.get('/ui', requireUiAuth, (req, res) => {
           const mac = p.mac || '';
           const host = p.hostname || '';
           const ports = p.ports || [];
-          const assigned = p.assignedTerminals || [];
+          const assignedMarkup = fmtAssignments(p);
           const safeIp = escapeHtml(ip);
           const safeMac = escapeHtml(mac);
           const safeHost = escapeHtml(host);
           return '<tr>' +
             '<td><code>' + safeIp + '</code></td>' +
+            '<td>' + fmtPrinterLabel(p) + '</td>' +
             '<td>' + fmtPorts(ports) + '</td>' +
             '<td>' + (mac ? '<code>' + safeMac + '</code>' : '') + '</td>' +
             '<td>' + safeHost + '</td>' +
-            '<td><div class="assigned-cell">' + fmtAssignments(assigned, ip) + '</div></td>' +
+            '<td><div class="assigned-cell">' + assignedMarkup + '</div></td>' +
             '<td><button data-ip="' + safeIp + '" class="assign">Assign…</button></td>' +
           '</tr>';
         }).join('');
-        tblBody.innerHTML = rows || '<tr><td colspan="6" class="muted">No printers found.</td></tr>';
+        tblBody.innerHTML = rows || '<tr><td colspan="7" class="muted">No printers found.</td></tr>';
         summaryEl.textContent = 'CIDR: ' + (data.cidr || 'n/a') +
           ' • ' + printers.length + ' printer(s)' +
           ' • ' + totalAssignments + ' assignment' + (totalAssignments === 1 ? '' : 's') +
@@ -1388,6 +1570,95 @@ app.get('/ui', requireUiAuth, (req, res) => {
       }
     }
 
+    async function setPrinterLabelValue(ip, label) {
+      const trimmedIp = String(ip || '').trim();
+      if (!trimmedIp) return;
+      const trimmedLabel = String(label || '').trim();
+      const removing = trimmedLabel.length === 0;
+      statusEl.textContent = removing ? 'Removing printer label…' : 'Saving printer label…';
+      try {
+        let res;
+        if (removing) {
+          res = await fetch('/printer-labels/' + encodeURIComponent(trimmedIp), {
+            method: 'DELETE',
+            headers: { 'Accept': 'application/json' },
+          });
+        } else {
+          res = await fetch('/printer-labels', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip: trimmedIp, label: trimmedLabel }),
+          });
+        }
+        const data = await res.json();
+        if (res.ok && data) {
+          await loadPrinters({});
+          statusEl.innerHTML = '<span class="ok">' + (removing ? 'Label cleared' : 'Label saved') + '</span> ' + escapeHtml(trimmedIp);
+        } else {
+          const message = data && (data.error || JSON.stringify(data));
+          statusEl.innerHTML = '<span class="err">Label update failed:</span> ' + escapeHtml(message || 'Unknown error');
+        }
+      } catch (e) {
+        statusEl.innerHTML = '<span class="err">Label update error:</span> ' + escapeHtml(e.message || String(e));
+      }
+    }
+
+    async function editPrinterLabel(ip, currentLabel = '') {
+      const ipStr = String(ip || '').trim();
+      if (!ipStr) return;
+      const value = prompt('Enter label for ' + ipStr + ':', currentLabel || '');
+      if (value === null) return;
+      await setPrinterLabelValue(ipStr, value);
+    }
+
+    async function clearPrinterLabel(ip) {
+      const ipStr = String(ip || '').trim();
+      if (!ipStr) return;
+      if (!window.confirm('Remove label for ' + ipStr + '?')) return;
+      await setPrinterLabelValue(ipStr, '');
+    }
+
+    async function setTerminalLabelValue(terminalId, label) {
+      const id = String(terminalId || '').trim();
+      if (!id) return;
+      const trimmedLabel = String(label || '').trim();
+      const removing = trimmedLabel.length === 0;
+      statusEl.textContent = removing ? 'Removing terminal label…' : 'Saving terminal label…';
+      try {
+        let res;
+        if (removing) {
+          res = await fetch('/terminal-labels/' + encodeURIComponent(id), {
+            method: 'DELETE',
+            headers: { 'Accept': 'application/json' },
+          });
+        } else {
+          res = await fetch('/terminal-labels', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ terminalId: id, label: trimmedLabel }),
+          });
+        }
+        const data = await res.json();
+        if (res.ok && data) {
+          await loadPrinters({});
+          statusEl.innerHTML = '<span class="ok">' + (removing ? 'Terminal label cleared' : 'Terminal label saved') + '</span> ' + escapeHtml(id);
+        } else {
+          const message = data && (data.error || JSON.stringify(data));
+          statusEl.innerHTML = '<span class="err">Terminal label failed:</span> ' + escapeHtml(message || 'Unknown error');
+        }
+      } catch (e) {
+        statusEl.innerHTML = '<span class="err">Terminal label error:</span> ' + escapeHtml(e.message || String(e));
+      }
+    }
+
+    async function editTerminalLabel(terminalId, currentLabel = '') {
+      const id = String(terminalId || '').trim();
+      if (!id) return;
+      const value = prompt('Enter label for ' + id + ':', currentLabel || '');
+      if (value === null) return;
+      await setTerminalLabelValue(id, value);
+    }
+
     document.addEventListener('click', (ev) => {
       if (userMenuEl && userMenuTrigger) {
         const triggerMatch = ev.target.closest('.user-menu__trigger');
@@ -1402,6 +1673,26 @@ app.get('/ui', requireUiAuth, (req, res) => {
         } else if (userMenuEl.classList.contains('is-open') && !ev.target.closest('.user-menu')) {
           closeUserMenu();
         }
+      }
+      const printerEditBtn = ev.target.closest('button.label-cell__edit');
+      if (printerEditBtn) {
+        const ip = printerEditBtn.getAttribute('data-ip') || '';
+        const current = printerEditBtn.getAttribute('data-label') || '';
+        editPrinterLabel(ip, current);
+        return;
+      }
+      const printerClearBtn = ev.target.closest('button.label-cell__clear');
+      if (printerClearBtn) {
+        const ip = printerClearBtn.getAttribute('data-ip') || '';
+        clearPrinterLabel(ip);
+        return;
+      }
+      const terminalEditBtn = ev.target.closest('button.chip__edit');
+      if (terminalEditBtn) {
+        const terminalId = terminalEditBtn.getAttribute('data-terminal') || '';
+        const current = terminalEditBtn.getAttribute('data-label') || '';
+        editTerminalLabel(terminalId, current);
+        return;
       }
       const removeBtn = ev.target.closest('button.chip__remove');
       if (removeBtn) {
@@ -1515,6 +1806,7 @@ app.get('/printers', async (req, res) => {
         }
         const { cidr, lastUpdated, printers } = discoveryCache;
         const mappings = getAllMappings();
+        const { printers: printerLabelMap, terminals: terminalLabelMap } = getAllLabels();
         const terminalsByIp = {};
         Object.entries(mappings || {}).forEach(([terminalId, ip]) => {
             if (!ip) return;
@@ -1523,10 +1815,20 @@ app.get('/printers', async (req, res) => {
             terminalsByIp[key].push(String(terminalId));
         });
         Object.values(terminalsByIp).forEach((arr) => arr.sort());
-        const printersWithAssignments = (printers || []).map((printer) => ({
-            ...printer,
-            assignedTerminals: terminalsByIp[printer.ip] || [],
-        }));
+        const printersWithAssignments = (printers || []).map((printer) => {
+            const ip = printer.ip;
+            const assignedIds = terminalsByIp[ip] || [];
+            const assignedTerminalDetails = assignedIds.map((terminalId) => ({
+                terminalId,
+                label: terminalLabelMap[terminalId]?.label || null,
+            }));
+            return {
+                ...printer,
+                label: printerLabelMap[ip]?.label || null,
+                assignedTerminals: assignedIds,
+                assignedTerminalDetails,
+            };
+        });
         if (!lastUpdated) {
             // No discovery has run yet; kick one off but don’t block
             runDiscovery(process.env.SUBNET || defaultCidrFromInterfaces()).catch(() => {});
@@ -1537,6 +1839,10 @@ app.get('/printers', async (req, res) => {
             count: (printers || []).length,
             printers: printersWithAssignments,
             mappings,
+            labels: {
+                printers: printerLabelMap,
+                terminals: terminalLabelMap,
+            },
         });
     } catch (err) {
         logger.error('GET /printers failed', { error: err.message });

@@ -40,3 +40,4 @@ cert.pem
 printerMap.json
 printers.json
 uiCredentials.json
+printerLabels.json
