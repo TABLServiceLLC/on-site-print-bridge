@@ -543,18 +543,27 @@ function renderProfilePage({ username = '', error = '', success = '' } = {}) {
       display: flex;
       gap: 6px;
     }
-    .label-cell__actions button {
-      padding: 6px 10px;
-      font-size: 12px;
-      border-radius: 8px;
-      box-shadow: none;
+    .label-cell__icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      border: none;
       background: rgba(59, 127, 190, 0.12);
       color: #1e3a5f;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 120ms ease, color 120ms ease;
     }
-    .label-cell__actions button:hover {
-      transform: none;
-      box-shadow: none;
+    .label-cell__icon:hover {
       background: rgba(59, 127, 190, 0.18);
+      color: #12375d;
+    }
+    .label-cell__icon:focus-visible {
+      outline: 2px solid rgba(59, 127, 190, 0.35);
+      outline-offset: 2px;
     }
     .modal {
       position: fixed;
@@ -1462,9 +1471,9 @@ app.get('/ui', requireUiAuth, (req, res) => {
       const hasLabel = Boolean(label);
       const labelDisplay = hasLabel ? '<span class="label-cell__value">' + escapeHtml(label) + '</span>' : '<span class="muted">No label</span>';
       const actions = hasLabel
-        ? '<button type="button" class="label-cell__edit" data-ip="' + safeIp + '" data-label="' + safeLabelAttr + '">Edit label</button>' +
-          '<button type="button" class="label-cell__clear" data-ip="' + safeIp + '">Clear</button>'
-        : '<button type="button" class="label-cell__edit" data-ip="' + safeIp + '" data-label="">Add label</button>';
+        ? '<button type="button" class="label-cell__icon label-cell__edit" data-ip="' + safeIp + '" data-label="' + safeLabelAttr + '" aria-label="Edit label">✎</button>' +
+          '<button type="button" class="label-cell__icon label-cell__clear" data-ip="' + safeIp + '" aria-label="Remove label">×</button>'
+        : '<button type="button" class="label-cell__icon label-cell__edit" data-ip="' + safeIp + '" data-label="" aria-label="Add label">✎</button>';
       return '<div class="label-cell">' +
         '<div>' + labelDisplay + '</div>' +
         '<div class="label-cell__actions">' + actions + '</div>' +
@@ -1480,7 +1489,7 @@ app.get('/ui', requireUiAuth, (req, res) => {
         const safeTerm = escapeHtml(det.terminalId || '');
         const safeLabelAttr = det.label ? escapeHtml(det.label) : '';
         const labelMarkup = det.label ? '<span class="chip__label">' + escapeHtml(det.label) + '</span>' : '';
-        const idMarkup = '<span class="chip__id">' + safeTerm + '</span>';
+        const idMarkup = det.label ? '' : '<span class="chip__id">' + safeTerm + '</span>';
         return '<span class="chip chip--assigned">' +
           labelMarkup + idMarkup +
           '<button type="button" class="chip__edit" data-terminal="' + safeTerm + '" data-label="' + safeLabelAttr + '">✎</button>' +
