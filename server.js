@@ -18,15 +18,7 @@ const PRINTER_PORT = 9100;
 const { getPrinterIp, setPrinterIp, getAllMappings, removePrinterIp } = require('./printerMap');
 const { scanNetwork, defaultCidrFromInterfaces } = require('./discoverPrinters');
 const { readCredentials, writeCredentials, CREDENTIALS_PATH } = require('./uiCredentials');
-const {
-    getAllLabels,
-    getAllPrinterLabels,
-    getAllTerminalLabels,
-    setPrinterLabel,
-    removePrinterLabel,
-    setTerminalLabel,
-    removeTerminalLabel,
-} = require('./printerLabels');
+const { getAllLabels, getAllPrinterLabels, getAllTerminalLabels, setPrinterLabel, removePrinterLabel, setTerminalLabel, removeTerminalLabel } = require('./printerLabels');
 const DISCOVERY_INTERVAL_MS = parseInt(process.env.DISCOVERY_INTERVAL_MS || '300000', 10); // 5 minutes
 const DISCOVERY_PORTS = [9100, 515, 631, 80, 443];
 const JWT_SECRET = process.env.JWT_SECRET || '';
@@ -34,12 +26,7 @@ const SESSION_COOKIE_NAME = 'tabl_ui_session';
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const sessions = new Map();
 
-const DEFAULT_ALLOWED_ORIGINS = [
-    'https://pos.tabl.page',
-    'http://localhost:8080',
-    'https://raspberrypi.local',
-    'https://raspberrypi.local:8443',
-];
+const DEFAULT_ALLOWED_ORIGINS = ['https://pos.tabl.page', 'http://localhost:8080', 'https://raspberrypi.local', 'https://raspberrypi.local:8443'];
 
 function normalizeOrigin(value) {
     if (!value || typeof value !== 'string') return '';
@@ -198,7 +185,7 @@ function getUserInitials(displayName) {
     const tokens = displayName.trim().split(/\s+/).filter(Boolean);
     if (tokens.length === 0) return 'U';
     const first = tokens[0][0];
-    const second = tokens.length > 1 ? tokens[1][0] : (tokens[0][1] || '');
+    const second = tokens.length > 1 ? tokens[1][0] : tokens[0][1] || '';
     return (first + second).toUpperCase();
 }
 
@@ -215,9 +202,7 @@ function sanitizeRedirectTarget(target) {
 }
 
 function renderLoginPage({ redirectTo = '/ui', error = '' } = {}) {
-    const errorBlock = error
-        ? `<div class="alert"><strong>Login failed.</strong> ${error}</div>`
-        : '';
+    const errorBlock = error ? `<div class="alert"><strong>Login failed.</strong> ${error}</div>` : '';
     return `<!doctype html>
 <html lang="en">
 <head>
@@ -369,11 +354,7 @@ function renderLoginPage({ redirectTo = '/ui', error = '' } = {}) {
 
 function renderProfilePage({ username = '', error = '', success = '' } = {}) {
     const safeUsername = escapeHtmlLite(username);
-    const messageBlock = error
-        ? `<div class="notice notice--error"><strong>Update failed.</strong> ${escapeHtmlLite(error)}</div>`
-        : success
-        ? `<div class="notice notice--success">${escapeHtmlLite(success)}</div>`
-        : '';
+    const messageBlock = error ? `<div class="notice notice--error"><strong>Update failed.</strong> ${escapeHtmlLite(error)}</div>` : success ? `<div class="notice notice--success">${escapeHtmlLite(success)}</div>` : '';
     return `<!doctype html>
 <html lang="en">
 <head>
@@ -996,7 +977,7 @@ app.get('/is-ip/:value', (req, res) => {
 // Basic UI to view printers and assign mapping
 app.get('/ui', requireUiAuth, (req, res) => {
     const authState = getUiAuthState();
-    const signedInUserRaw = typeof res.locals.uiUser === 'string' ? res.locals.uiUser : (authState.enabled ? authState.username : '');
+    const signedInUserRaw = typeof res.locals.uiUser === 'string' ? res.locals.uiUser : authState.enabled ? authState.username : '';
     const showUserMenu = authState.enabled && Boolean(signedInUserRaw);
     const sanitizedUserName = escapeHtmlLite(signedInUserRaw);
     const sanitizedInitials = escapeHtmlLite(getUserInitials(signedInUserRaw));
@@ -1048,7 +1029,7 @@ app.get('/ui', requireUiAuth, (req, res) => {
       color: #0f172a;
     }
     .page {
-      max-width: 1040px;
+      max-width: 1200px;
       margin: 0 auto;
       padding: 48px 24px 64px;
     }
@@ -1330,6 +1311,10 @@ app.get('/ui', requireUiAuth, (req, res) => {
       border-radius: 999px;
       padding: 2px 6px;
     }
+    .label-chip {
+      background: rgba(59, 127, 190, 0.18);
+      color: #1e3a5f;
+    }
     .status {
       font-size: 13px;
       color: #475569;
@@ -1469,15 +1454,14 @@ app.get('/ui', requireUiAuth, (req, res) => {
       const safeIp = escapeHtml(ip);
       const safeLabelAttr = escapeHtml(label);
       const hasLabel = Boolean(label);
-      const labelDisplay = hasLabel ? '<span class="label-cell__value">' + escapeHtml(label) + '</span>' : '<span class="muted">No label</span>';
-      const actions = hasLabel
-        ? '<button type="button" class="label-cell__icon label-cell__edit" data-ip="' + safeIp + '" data-label="' + safeLabelAttr + '" aria-label="Edit label">✎</button>' +
-          '<button type="button" class="label-cell__icon label-cell__clear" data-ip="' + safeIp + '" aria-label="Remove label">×</button>'
-        : '<button type="button" class="label-cell__icon label-cell__edit" data-ip="' + safeIp + '" data-label="" aria-label="Add label">✎</button>';
-      return '<div class="label-cell">' +
-        '<div>' + labelDisplay + '</div>' +
-        '<div class="label-cell__actions">' + actions + '</div>' +
-      '</div>';
+      const labelContent = hasLabel
+        ? '<span class="chip__label">' + escapeHtml(label) + '</span>'
+        : '<span class="chip__id">No label</span>';
+      return '<span class="chip label-chip">' +
+        labelContent +
+        '<button type="button" class="chip__edit" data-ip="' + safeIp + '" data-label="' + safeLabelAttr + '">✎</button>' +
+        (hasLabel ? '<button type="button" class="chip__remove" data-ip="' + safeIp + '" aria-label="Remove label">×</button>' : '') +
+      '</span>';
     }
     function fmtAssignments(printer) {
       const safeIp = escapeHtml(printer.ip || '');
@@ -1683,28 +1667,28 @@ app.get('/ui', requireUiAuth, (req, res) => {
           closeUserMenu();
         }
       }
-      const printerEditBtn = ev.target.closest('button.label-cell__edit');
-      if (printerEditBtn) {
-        const ip = printerEditBtn.getAttribute('data-ip') || '';
-        const current = printerEditBtn.getAttribute('data-label') || '';
-        editPrinterLabel(ip, current);
-        return;
-      }
-      const printerClearBtn = ev.target.closest('button.label-cell__clear');
-      if (printerClearBtn) {
-        const ip = printerClearBtn.getAttribute('data-ip') || '';
-        clearPrinterLabel(ip);
-        return;
-      }
-      const terminalEditBtn = ev.target.closest('button.chip__edit');
-      if (terminalEditBtn) {
-        const terminalId = terminalEditBtn.getAttribute('data-terminal') || '';
-        const current = terminalEditBtn.getAttribute('data-label') || '';
-        editTerminalLabel(terminalId, current);
-        return;
+      const editBtn = ev.target.closest('button.chip__edit');
+      if (editBtn) {
+        const ipTarget = editBtn.getAttribute('data-ip') || '';
+        if (ipTarget) {
+          const current = editBtn.getAttribute('data-label') || '';
+          editPrinterLabel(ipTarget, current);
+          return;
+        }
+        const terminalId = editBtn.getAttribute('data-terminal') || '';
+        if (terminalId) {
+          const current = editBtn.getAttribute('data-label') || '';
+          editTerminalLabel(terminalId, current);
+          return;
+        }
       }
       const removeBtn = ev.target.closest('button.chip__remove');
       if (removeBtn) {
+        const ipTarget = removeBtn.getAttribute('data-ip') || '';
+        if (ipTarget && !removeBtn.getAttribute('data-terminal')) {
+          clearPrinterLabel(ipTarget);
+          return;
+        }
         const terminalIdAttr = removeBtn.getAttribute('data-terminal');
         if (terminalIdAttr) {
           const trimmedId = terminalIdAttr.trim();
@@ -2006,7 +1990,7 @@ const POLL_INTERVAL_MS = parseInt(process.env.PRINT_POLL_INTERVAL_MS || '5000', 
 // Outbound auth preference: JWT (JWT_TOKEN or POLL_JWT), fallback to API_TOKEN
 const OUTBOUND_JWT = process.env.JWT_TOKEN || process.env.POLL_JWT || '';
 const API_TOKEN = process.env.API_TOKEN || process.env.PRINT_API_TOKEN || '';
-const POLL_INSECURE_TLS = ['1','true','yes','on'].includes(String(process.env.PRINT_POLL_INSECURE_TLS).toLowerCase());
+const POLL_INSECURE_TLS = ['1', 'true', 'yes', 'on'].includes(String(process.env.PRINT_POLL_INSECURE_TLS).toLowerCase());
 const POLL_CA_FILE = process.env.PRINT_POLL_CA_FILE || '';
 
 async function fetchPendingPrintJobs() {
