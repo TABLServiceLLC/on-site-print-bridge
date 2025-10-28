@@ -189,6 +189,31 @@ function getUserInitials(displayName) {
     return (first + second).toUpperCase();
 }
 
+function buildUserMenu(authState, signedInUserRaw) {
+    if (!authState || !authState.enabled) return '';
+    if (typeof signedInUserRaw !== 'string' || !signedInUserRaw.trim()) return '';
+    const sanitizedUserName = escapeHtmlLite(signedInUserRaw);
+    const sanitizedInitials = escapeHtmlLite(getUserInitials(signedInUserRaw));
+    return `<div class="topbar">
+      <div class="topbar__actions">
+        <div class="user-menu" data-open="false">
+          <button class="user-menu__trigger" type="button" aria-haspopup="true" aria-expanded="false">
+            <span class="user-menu__initials">${sanitizedInitials}</span>
+            <span class="user-menu__name">${sanitizedUserName}</span>
+            <span class="user-menu__caret">&#9662;</span>
+          </button>
+          <div class="user-menu__dropdown" role="menu">
+            <a class="user-menu__link" href="/profile" role="menuitem">Edit profile</a>
+            <form method="POST" action="/logout" role="none">
+              <input type="hidden" name="redirect" value="/login" />
+              <button type="submit" class="user-menu__link user-menu__logout" role="menuitem">Log out</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
 function sanitizeRedirectTarget(target) {
     if (typeof target !== 'string' || target.length === 0) return '/ui';
     try {
@@ -230,6 +255,10 @@ function renderLoginPage({ redirectTo = '/ui', error = '' } = {}) {
       justify-content: center;
       color: #0f172a;
       padding: 24px;
+    }
+    .login-layout {
+      width: 100%;
+      max-width: 520px;
     }
     .card {
       background: rgba(248, 251, 255, 0.96);
@@ -327,26 +356,28 @@ function renderLoginPage({ redirectTo = '/ui', error = '' } = {}) {
   </style>
 </head>
 <body>
-  <main class="card" role="main">
-    <div class="logo">
-      <img src="/assets/TABL_Logo.svg" alt="TABL" />
+  <main class="login-layout">
+    <div class="card" role="main">
+      <div class="logo">
+        <img src="/assets/TABL_Logo.svg" alt="TABL" />
+      </div>
+      <h1>Sign in</h1>
+      <p class="subtitle">Enter the bridge credentials to continue.</p>
+      ${errorBlock}
+      <form method="POST" action="/login" novalidate>
+        <input type="hidden" name="redirect" value="${encodeURIComponent(redirectTo)}" />
+        <div class="field">
+          <label for="username">Username</label>
+          <input type="text" id="username" name="username" autocomplete="username" required />
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" autocomplete="current-password" required />
+        </div>
+        <button type="submit">Access Bridge</button>
+      </form>
+      <p class="meta">Need access? Contact your device administrator.</p>
     </div>
-    <h1>Sign in</h1>
-    <p class="subtitle">Enter the bridge credentials to continue.</p>
-    ${errorBlock}
-    <form method="POST" action="/login" novalidate>
-      <input type="hidden" name="redirect" value="${encodeURIComponent(redirectTo)}" />
-      <div class="field">
-        <label for="username">Username</label>
-        <input type="text" id="username" name="username" autocomplete="username" required />
-      </div>
-      <div class="field">
-        <label for="password">Password</label>
-        <input type="password" id="password" name="password" autocomplete="current-password" required />
-      </div>
-      <button type="submit">Access Bridge</button>
-    </form>
-    <p class="meta">Need access? Contact your device administrator.</p>
   </main>
 </body>
 </html>`;
@@ -737,6 +768,121 @@ function extractBearerToken(headerValue) {
     return trimmed;
 }
 
+function collectTerminals() {
+    const labels = getAllTerminalLabels() || {};
+    const mappings = getAllMappings() || {};
+    const ids = new Set([...Object.keys(labels), ...Object.keys(mappings)]);
+    const sorted = Array.from(ids).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    return sorted.map((terminalId) => ({
+        terminalId,
+        label: typeof labels[terminalId]?.label === 'string' ? labels[terminalId].label : '',
+        assignedIp: mappings[terminalId] || null,
+    }));
+}
+
+function collectPrinters() {
+    const labels = getAllPrinterLabels() || {};
+    const terminalLabels = getAllTerminalLabels() || {};
+    const mappings = getAllMappings() || {};
+    const terminalsByIp = {};
+    Object.entries(mappings).forEach(([terminalId, ip]) => {
+        if (!ip) return;
+        const key = String(ip);
+        if (!terminalsByIp[key]) terminalsByIp[key] = [];
+        terminalsByIp[key].push(String(terminalId));
+    });
+    Object.values(terminalsByIp).forEach((list) => list.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })));
+    const ips = new Set([...Object.keys(labels), ...Object.keys(terminalsByIp)]);
+    const sortedIps = Array.from(ips).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    return sortedIps.map((ip) => {
+        const assignedTerminals = terminalsByIp[ip] || [];
+        const assignedTerminalDetails = assignedTerminals.map((terminalId) => ({
+            terminalId,
+            label: typeof terminalLabels[terminalId]?.label === 'string' ? terminalLabels[terminalId].label : '',
+        }));
+        return {
+            ip,
+            label: typeof labels[ip]?.label === 'string' ? labels[ip].label : '',
+            assignedTerminals,
+            assignedTerminalDetails,
+        };
+    });
+}
+
+const NAV_LINKS = [
+    { href: '/ui', label: 'Dashboard' },
+    { href: '/ui/printers', label: 'Printers' },
+    { href: '/ui/terminals', label: 'Terminals' },
+    { href: '/profile', label: 'Profile' },
+];
+
+const GLOBAL_NAV_STYLES = `
+    .global-nav {
+      position: sticky;
+      top: 0;
+      z-index: 120;
+      backdrop-filter: blur(12px);
+      background: rgba(248, 251, 255, 0.86);
+      border-bottom: 1px solid rgba(15, 31, 55, 0.08);
+    }
+    .global-nav__inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 14px 24px;
+    }
+    .global-nav__brand {
+      font-weight: 700;
+      font-size: 16px;
+      letter-spacing: 0.04em;
+      color: #1e3a5f;
+    }
+    .global-nav__links {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: flex-end;
+    }
+    .global-nav__link {
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 600;
+      color: #475569;
+      padding: 6px 12px;
+      border-radius: 999px;
+      transition: background 120ms ease, color 120ms ease, transform 120ms ease;
+    }
+    .global-nav__link:hover {
+      color: #1d4ed8;
+      background: rgba(29, 78, 216, 0.12);
+      transform: translateY(-1px);
+    }
+    .global-nav__link--active {
+      color: #0f172a;
+      background: rgba(15, 23, 42, 0.14);
+    }
+`;
+
+function normalizePathForNav(value) {
+    if (typeof value !== 'string' || value.length === 0) return '/';
+    if (value.startsWith('/')) return value;
+    return `/${value.replace(/^\/+/, '')}`;
+}
+
+function buildNavBar({ currentPath = '/', signedIn = false } = {}) {
+    const normalized = normalizePathForNav(currentPath);
+    const links = NAV_LINKS.map((link) => {
+        const isActive = normalized === link.href || (link.href !== '/' && normalized.startsWith(`${link.href}/`));
+        const cls = isActive ? 'global-nav__link global-nav__link--active' : 'global-nav__link';
+        return `<a class="${cls}" href="${link.href}">${link.label}</a>`;
+    }).join('');
+    return `<nav class="global-nav"><div class="global-nav__inner"><span class="global-nav__brand">TABL Bridge</span><div class="global-nav__links">${links}</div></div></nav>`;
+}
+
 function requireUiAuth(req, res, next) {
     const { enabled } = getUiAuthState();
     if (!enabled) return next();
@@ -996,29 +1142,8 @@ app.get('/is-ip/:value', (req, res) => {
 app.get('/ui', requireUiAuth, (req, res) => {
     const authState = getUiAuthState();
     const signedInUserRaw = typeof res.locals.uiUser === 'string' ? res.locals.uiUser : authState.enabled ? authState.username : '';
-    const showUserMenu = authState.enabled && Boolean(signedInUserRaw);
-    const sanitizedUserName = escapeHtmlLite(signedInUserRaw);
-    const sanitizedInitials = escapeHtmlLite(getUserInitials(signedInUserRaw));
-    const userMenuHtml = showUserMenu
-        ? `<div class="topbar">
-      <div class="topbar__actions">
-        <div class="user-menu" data-open="false">
-          <button class="user-menu__trigger" type="button" aria-haspopup="true" aria-expanded="false">
-            <span class="user-menu__initials">${sanitizedInitials}</span>
-            <span class="user-menu__name">${sanitizedUserName}</span>
-            <span class="user-menu__caret">&#9662;</span>
-          </button>
-          <div class="user-menu__dropdown" role="menu">
-            <a class="user-menu__link" href="/profile" role="menuitem">Edit profile</a>
-            <form method="POST" action="/logout" role="none">
-              <input type="hidden" name="redirect" value="/login" />
-              <button type="submit" class="user-menu__link user-menu__logout" role="menuitem">Log out</button>
-            </form>
-          </div>
-        </div>
-      </div>
-    </div>`
-        : '';
+    const userMenuHtml = buildUserMenu(authState, signedInUserRaw);
+    const navHtml = buildNavBar({ currentPath: req.path, signedIn: Boolean(signedInUserRaw) });
     const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -1032,6 +1157,7 @@ app.get('/ui', requireUiAuth, (req, res) => {
   <link rel="apple-touch-icon" href="/assets/apple-touch-icon.webp" />
   <link rel="manifest" href="/assets/site.webmanifest" />
   <style>
+    ${GLOBAL_NAV_STYLES}
     :root { color-scheme: light; font-size: 16px; }
     * { box-sizing: border-box; }
     body {
@@ -1393,8 +1519,9 @@ app.get('/ui', requireUiAuth, (req, res) => {
       }
     }
   </style>
- </head>
+</head>
 <body>
+  ${navHtml}
   <div class="page">
     ${userMenuHtml}
     <header class="hero">
@@ -1798,6 +1925,1018 @@ app.delete('/assign/:terminalId', authenticateToken, async (req, res) => {
     }
 });
 
+app.get('/api/printers', authorizeApi, (req, res) => {
+    const printers = collectPrinters();
+    res.json({ printers });
+});
+
+app.post('/printers', authorizeApi, (req, res) => {
+    const ipRaw = typeof req.body?.ip === 'string' ? req.body.ip : '';
+    const ip = ipRaw.trim();
+    if (!ip || net.isIP(ip) === 0) {
+        return res.status(400).json({ error: 'ip must be a valid IPv4/IPv6 address' });
+    }
+    const labelRaw = typeof req.body?.label === 'string' ? req.body.label : '';
+    const label = labelRaw.trim();
+    setPrinterLabel(ip, label);
+    logger.info('Printer label saved', { ip, label });
+    const printers = collectPrinters();
+    const printer = printers.find((entry) => entry.ip === ip) || null;
+    res.json({ ok: true, printer, printers });
+});
+
+app.patch('/printers/:ip', authorizeApi, (req, res) => {
+    const ipParam = typeof req.params?.ip === 'string' ? req.params.ip : '';
+    const ip = ipParam.trim();
+    if (!ip || net.isIP(ip) === 0) {
+        return res.status(400).json({ error: 'ip must be a valid IPv4/IPv6 address' });
+    }
+    const labelRaw = typeof req.body?.label === 'string' ? req.body.label : '';
+    const label = labelRaw.trim();
+    if (!label) {
+        removePrinterLabel(ip);
+        logger.info('Printer label removed', { ip });
+    } else {
+        setPrinterLabel(ip, label);
+        logger.info('Printer label saved', { ip, label });
+    }
+    const printers = collectPrinters();
+    const printer = printers.find((entry) => entry.ip === ip) || null;
+    res.json({ ok: true, printer, printers });
+});
+
+app.delete('/printers/:ip', authorizeApi, (req, res) => {
+    const ipParam = typeof req.params?.ip === 'string' ? req.params.ip : '';
+    const ip = ipParam.trim();
+    if (!ip || net.isIP(ip) === 0) {
+        return res.status(400).json({ error: 'ip must be a valid IPv4/IPv6 address' });
+    }
+    removePrinterLabel(ip);
+    const mappings = getAllMappings();
+    const affectedTerminals = Object.entries(mappings || {})
+        .filter(([, mappedIp]) => String(mappedIp).trim() === ip)
+        .map(([terminalId]) => terminalId);
+    const removedTerminals = [];
+    affectedTerminals.forEach((terminalId) => {
+        try {
+            const result = removePrinterIp(terminalId);
+            if (result && Object.prototype.hasOwnProperty.call(result, 'removedIp')) {
+                removedTerminals.push(String(terminalId));
+            }
+        } catch (err) {
+            logger.warn('Failed to remove mapping during printer delete', { terminalId, ip, error: err.message });
+        }
+    });
+    logger.info('Printer entry removed', { ip, removedTerminals });
+    const printers = collectPrinters();
+    res.json({ ok: true, ip, removedTerminals, printers });
+});
+
+app.get('/ui/printers', requireUiAuth, (req, res) => {
+    const authState = getUiAuthState();
+    const signedInUserRaw = typeof res.locals.uiUser === 'string' ? res.locals.uiUser : authState.enabled ? authState.username : '';
+    const userMenuHtml = buildUserMenu(authState, signedInUserRaw);
+    const navHtml = buildNavBar({ currentPath: req.path, signedIn: Boolean(signedInUserRaw) });
+    const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TABL Printers</title>
+  <meta name="theme-color" content="#3B7FBE" />
+  <link rel="icon" type="image/x-icon" href="/assets/favicon.ico" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.webp" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.webp" />
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.webp" />
+  <link rel="manifest" href="/assets/site.webmanifest" />
+  <style>
+    ${GLOBAL_NAV_STYLES}
+    :root { color-scheme: light; font-size: 16px; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, Arial, sans-serif;
+      background-color: #f5f7fb;
+      background-image:
+        radial-gradient(120% 120% at 12% -10%, rgba(59, 127, 190, 0.14), transparent 55%),
+        radial-gradient(120% 120% at 88% 0%, rgba(15, 27, 51, 0.1), transparent 60%),
+        linear-gradient(180deg, #f6f9ff 0%, #ffffff 100%);
+      background-attachment: fixed;
+      background-repeat: no-repeat;
+      color: #0f172a;
+    }
+    .page {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 48px 24px 64px;
+    }
+    .hero {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .hero__text {
+      flex: 1 1 420px;
+    }
+    .hero__title {
+      margin: 0;
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+    .hero__subtitle {
+      margin: 6px 0 0;
+      font-size: 15px;
+      color: #475569;
+      max-width: 520px;
+    }
+    .hero__actions {
+      display: flex;
+      align-items: center;
+    }
+    .hero__link {
+      font-size: 13px;
+      color: #3B7FBE;
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .hero__link:hover {
+      text-decoration: underline;
+    }
+    .card {
+      background: rgba(248, 251, 255, 0.96);
+      border-radius: 18px;
+      box-shadow: 0 22px 56px rgba(15, 31, 55, 0.22);
+      padding: 28px 24px;
+    }
+    .controls {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .controls__group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .controls__summary {
+      font-size: 13px;
+      color: #64748b;
+    }
+    .btn-primary, .btn-outline {
+      border-radius: 12px;
+      padding: 10px 18px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease, color 120ms ease;
+      border: none;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #3B7FBE 0%, #265785 100%);
+      color: #fff;
+      box-shadow: 0 14px 28px rgba(59, 127, 190, 0.45);
+    }
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 16px 32px rgba(59, 127, 190, 0.5);
+    }
+    .btn-outline {
+      background: transparent;
+      color: #1e3a5f;
+      border: 1px solid rgba(59, 127, 190, 0.6);
+    }
+    .btn-outline:hover {
+      background: rgba(59, 127, 190, 0.12);
+      transform: translateY(-1px);
+    }
+    .table-wrapper {
+      overflow-x: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    th, td {
+      padding: 12px 16px;
+      text-align: left;
+      font-size: 14px;
+      border-bottom: 1px solid rgba(15, 31, 55, 0.08);
+    }
+    th {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #64748b;
+      background: rgba(15, 23, 42, 0.04);
+    }
+    tbody tr:last-child td {
+      border-bottom: none;
+    }
+    tbody tr:hover {
+      background: rgba(59, 127, 190, 0.08);
+    }
+    code {
+      background: rgba(15, 23, 42, 0.08);
+      color: #1f2937;
+      border-radius: 6px;
+      padding: 2px 6px;
+      font-size: 12px;
+    }
+    .label-pill {
+      display: inline-flex;
+      align-items: center;
+      background: rgba(59, 127, 190, 0.18);
+      color: #1e3a5f;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .assigned-pill {
+      display: inline-flex;
+      align-items: center;
+      background: rgba(15, 23, 42, 0.08);
+      color: #0f172a;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      margin: 0 6px 6px 0;
+    }
+    .assigned-pill__label {
+      font-weight: 600;
+      margin-right: 6px;
+      color: #0f172a;
+    }
+    .assigned-pill__id {
+      color: #475569;
+      background: rgba(15, 23, 42, 0.04);
+      border-radius: 999px;
+      padding: 2px 6px;
+    }
+    .actions {
+      display: flex;
+      gap: 12px;
+    }
+    .btn-link {
+      border: none;
+      background: transparent;
+      font-size: 13px;
+      font-weight: 600;
+      color: #1d4ed8;
+      cursor: pointer;
+      padding: 0;
+    }
+    .btn-link:hover {
+      text-decoration: underline;
+    }
+    .btn-link.delete {
+      color: #b3261e;
+    }
+    .muted {
+      color: #94a3b8;
+    }
+    .status {
+      margin: 18px 4px 0;
+      font-size: 13px;
+      color: #475569;
+    }
+    @media (max-width: 720px) {
+      .controls {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .controls__group {
+        justify-content: flex-start;
+      }
+      table {
+        min-width: 520px;
+      }
+    }
+  </style>
+</head>
+<body>
+  ${navHtml}
+  <div class="page">
+    ${userMenuHtml}
+    <header class="hero">
+      <div class="hero__text">
+        <h1 class="hero__title">Printer Directory</h1>
+        <p class="hero__subtitle">Review discovered printers, manage labels, and monitor terminal usage.</p>
+      </div>
+      <div class="hero__actions">
+        <a class="hero__link" href="/ui">← Back to Printers Table</a>
+      </div>
+    </header>
+    <section class="card">
+      <div class="controls">
+        <div class="controls__group">
+          <button id="refresh" class="btn-outline" type="button">Refresh</button>
+          <button id="add-printer" class="btn-primary" type="button">Add Printer</button>
+        </div>
+        <span id="summary" class="controls__summary muted"></span>
+      </div>
+      <div class="table-wrapper">
+        <table id="printer-table">
+          <thead>
+            <tr>
+              <th>IP Address</th>
+              <th>Label</th>
+              <th>Assigned Terminals</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td colspan="4" class="muted">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="status" id="status"></p>
+    </section>
+  </div>
+  <script>
+    const userMenuEl = document.querySelector('.user-menu');
+    const userMenuTrigger = userMenuEl ? userMenuEl.querySelector('.user-menu__trigger') : null;
+    const logoutRedirectInput = userMenuEl ? userMenuEl.querySelector('form[action="/logout"] input[name="redirect"]') : null;
+    if (logoutRedirectInput) {
+      const currentPath = (window.location.pathname || '/ui/printers') + (window.location.search || '');
+      logoutRedirectInput.value = encodeURIComponent(currentPath || '/ui/printers');
+    }
+    const closeUserMenu = () => {
+      if (!userMenuEl || !userMenuTrigger) return;
+      userMenuEl.classList.remove('is-open');
+      userMenuTrigger.setAttribute('aria-expanded', 'false');
+    };
+    const toggleUserMenu = () => {
+      if (!userMenuEl || !userMenuTrigger) return;
+      const willOpen = !userMenuEl.classList.contains('is-open');
+      if (willOpen) {
+        userMenuEl.classList.add('is-open');
+        userMenuTrigger.setAttribute('aria-expanded', 'true');
+      } else {
+        closeUserMenu();
+      }
+    };
+    if (userMenuEl && userMenuTrigger) {
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') closeUserMenu();
+      });
+    }
+
+    const tblBody = document.querySelector('#printer-table tbody');
+    const statusEl = document.getElementById('status');
+    const summaryEl = document.getElementById('summary');
+    const refreshBtn = document.getElementById('refresh');
+    const addBtn = document.getElementById('add-printer');
+    let printers = [];
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function renderAssigned(details) {
+      if (!Array.isArray(details) || details.length === 0) return '<span class="muted">Unassigned</span>';
+      return details.map((item) => {
+        const labelMarkup = item.label ? '<span class="assigned-pill__label">' + escapeHtml(item.label) + '</span>' : '';
+        const idMarkup = '<span class="assigned-pill__id">' + escapeHtml(item.terminalId || '') + '</span>';
+        return '<span class="assigned-pill">' + labelMarkup + idMarkup + '</span>';
+      }).join('');
+    }
+
+    function renderPrinters(list) {
+      if (!Array.isArray(list) || list.length === 0) {
+        tblBody.innerHTML = '<tr><td colspan="4" class="muted">No printers found.</td></tr>';
+        summaryEl.textContent = '0 printers';
+        return;
+      }
+      const rows = list.map((item) => {
+        const safeIp = escapeHtml(item.ip || '');
+        const label = typeof item.label === 'string' && item.label.length > 0 ? escapeHtml(item.label) : '';
+        const labelCell = label ? '<span class="label-pill">' + label + '</span>' : '<span class="muted">No label</span>';
+        const assigned = renderAssigned(Array.isArray(item.assignedTerminalDetails) ? item.assignedTerminalDetails : []);
+        return '<tr data-ip="' + safeIp + '">' +
+          '<td><code>' + safeIp + '</code></td>' +
+          '<td>' + labelCell + '</td>' +
+          '<td>' + assigned + '</td>' +
+          '<td class="actions">' +
+            '<button type="button" class="btn-link edit" data-action="edit" data-ip="' + safeIp + '">Edit</button>' +
+            '<button type="button" class="btn-link delete" data-action="delete" data-ip="' + safeIp + '">Delete</button>' +
+          '</td>' +
+        '</tr>';
+      }).join('');
+      tblBody.innerHTML = rows;
+      const count = list.length;
+      summaryEl.textContent = count + ' printer' + (count === 1 ? '' : 's');
+    }
+
+    async function loadPrinters() {
+      statusEl.textContent = 'Loading printers…';
+      try {
+        const res = await fetch('/api/printers', { headers: { 'Accept': 'application/json' } });
+        if (!res.ok) throw new Error('Request failed (' + res.status + ')');
+        const data = await res.json();
+        printers = Array.isArray(data.printers) ? data.printers : [];
+        renderPrinters(printers);
+        statusEl.textContent = 'Loaded ' + printers.length + ' printer' + (printers.length === 1 ? '' : 's') + '.';
+      } catch (err) {
+        statusEl.textContent = 'Load failed: ' + (err && err.message ? err.message : String(err));
+      }
+    }
+
+    async function createPrinter() {
+      const ipValue = window.prompt('Enter printer IP address:');
+      if (ipValue === null) return;
+      const ip = String(ipValue).trim();
+      if (!ip) {
+        window.alert('Printer IP is required.');
+        return;
+      }
+      const labelValue = window.prompt('Enter label for ' + ip + ' (optional):', '');
+      if (labelValue === null) return;
+      const label = String(labelValue).trim();
+      statusEl.textContent = 'Creating printer entry…';
+      try {
+        const res = await fetch('/printers', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ip, label })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) {
+          throw new Error((data && data.error) || 'Request failed (' + res.status + ')');
+        }
+        printers = Array.isArray(data.printers) ? data.printers : printers;
+        renderPrinters(printers);
+        statusEl.textContent = 'Printer ' + ip + ' saved.';
+      } catch (err) {
+        statusEl.textContent = 'Create failed: ' + (err && err.message ? err.message : String(err));
+      }
+    }
+
+    async function savePrinterLabel(ip, label) {
+      if (!ip) return;
+      statusEl.textContent = 'Saving label…';
+      try {
+        const res = await fetch('/printers/' + encodeURIComponent(ip), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) {
+          throw new Error((data && data.error) || 'Request failed (' + res.status + ')');
+        }
+        printers = Array.isArray(data.printers) ? data.printers : printers;
+        renderPrinters(printers);
+        statusEl.textContent = 'Label updated for ' + ip + '.';
+      } catch (err) {
+        statusEl.textContent = 'Update failed: ' + (err && err.message ? err.message : String(err));
+      }
+    }
+
+    async function deletePrinter(ip) {
+      if (!ip) return;
+      const confirmed = window.confirm('Delete printer ' + ip + '? Any assignments to this IP will be removed.');
+      if (!confirmed) return;
+      statusEl.textContent = 'Deleting printer…';
+      try {
+        const res = await fetch('/printers/' + encodeURIComponent(ip), {
+          method: 'DELETE',
+          headers: { 'Accept': 'application/json' }
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) {
+          throw new Error((data && data.error) || 'Request failed (' + res.status + ')');
+        }
+        printers = Array.isArray(data.printers) ? data.printers : printers;
+        renderPrinters(printers);
+        const removed = Array.isArray(data.removedTerminals) && data.removedTerminals.length
+          ? ' Removed assignments for ' + data.removedTerminals.join(', ') + '.'
+          : '';
+        statusEl.textContent = 'Printer ' + ip + ' deleted.' + removed;
+      } catch (err) {
+        statusEl.textContent = 'Delete failed: ' + (err && err.message ? err.message : String(err));
+      }
+    }
+
+    document.addEventListener('click', (event) => {
+      if (userMenuEl && userMenuTrigger) {
+        const triggerMatch = event.target.closest('.user-menu__trigger');
+        if (triggerMatch) {
+          event.preventDefault();
+          toggleUserMenu();
+          return;
+        }
+        const menuItem = event.target.closest('.user-menu__link');
+        if (menuItem) {
+          closeUserMenu();
+        } else if (userMenuEl.classList.contains('is-open') && !event.target.closest('.user-menu')) {
+          closeUserMenu();
+        }
+      }
+      const actionBtn = event.target.closest('button[data-action]');
+      if (actionBtn) {
+        const ip = actionBtn.getAttribute('data-ip') || '';
+        const action = actionBtn.getAttribute('data-action');
+        if (!ip || !action) return;
+        if (action === 'edit') {
+          const entry = printers.find((item) => item.ip === ip);
+          const currentLabel = entry ? entry.label || '' : '';
+          const next = window.prompt('Update label for ' + ip + ':', currentLabel);
+          if (next === null) return;
+          savePrinterLabel(ip, String(next).trim());
+        } else if (action === 'delete') {
+          deletePrinter(ip);
+        }
+      }
+    });
+
+    refreshBtn.addEventListener('click', () => loadPrinters());
+    addBtn.addEventListener('click', () => createPrinter());
+
+    loadPrinters();
+  </script>
+</body>
+</html>`;
+    res.set('Content-Type', 'text/html');
+    res.send(html);
+});
+
+app.get('/ui/terminals', requireUiAuth, (req, res) => {
+    const authState = getUiAuthState();
+    const signedInUserRaw = typeof res.locals.uiUser === 'string' ? res.locals.uiUser : authState.enabled ? authState.username : '';
+    const userMenuHtml = buildUserMenu(authState, signedInUserRaw);
+    const navHtml = buildNavBar({ currentPath: req.path, signedIn: Boolean(signedInUserRaw) });
+    const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TABL Terminals</title>
+  <meta name="theme-color" content="#3B7FBE" />
+  <link rel="icon" type="image/x-icon" href="/assets/favicon.ico" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.webp" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.webp" />
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.webp" />
+  <link rel="manifest" href="/assets/site.webmanifest" />
+  <style>
+    ${GLOBAL_NAV_STYLES}
+    :root { color-scheme: light; font-size: 16px; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, Arial, sans-serif;
+      background-color: #f5f7fb;
+      background-image:
+        radial-gradient(120% 120% at 12% -10%, rgba(59, 127, 190, 0.14), transparent 55%),
+        radial-gradient(120% 120% at 88% 0%, rgba(15, 27, 51, 0.1), transparent 60%),
+        linear-gradient(180deg, #f6f9ff 0%, #ffffff 100%);
+      background-attachment: fixed;
+      background-repeat: no-repeat;
+      color: #0f172a;
+    }
+    .page {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 48px 24px 64px;
+    }
+    .topbar {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+    .hero {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .hero__text {
+      flex: 1 1 420px;
+    }
+    .hero__title {
+      margin: 0;
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+    .hero__subtitle {
+      margin: 6px 0 0;
+      font-size: 15px;
+      color: #475569;
+      max-width: 520px;
+    }
+    .hero__actions {
+      display: flex;
+      align-items: center;
+    }
+    .hero__link {
+      font-size: 13px;
+      color: #3B7FBE;
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .hero__link:hover {
+      text-decoration: underline;
+    }
+    .card {
+      background: rgba(248, 251, 255, 0.96);
+      border-radius: 18px;
+      box-shadow: 0 22px 56px rgba(15, 31, 55, 0.22);
+      padding: 28px 24px;
+    }
+    .controls {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .controls__group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .controls__summary {
+      font-size: 13px;
+      color: #64748b;
+    }
+    .btn-primary, .btn-outline {
+      border-radius: 12px;
+      padding: 10px 18px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease, color 120ms ease;
+      border: none;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #3B7FBE 0%, #265785 100%);
+      color: #fff;
+      box-shadow: 0 14px 28px rgba(59, 127, 190, 0.45);
+    }
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 16px 32px rgba(59, 127, 190, 0.5);
+    }
+    .btn-outline {
+      background: transparent;
+      color: #1e3a5f;
+      border: 1px solid rgba(59, 127, 190, 0.6);
+    }
+    .btn-outline:hover {
+      background: rgba(59, 127, 190, 0.12);
+      transform: translateY(-1px);
+    }
+    .table-wrapper {
+      overflow-x: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    th, td {
+      padding: 12px 16px;
+      text-align: left;
+      font-size: 14px;
+      border-bottom: 1px solid rgba(15, 31, 55, 0.08);
+    }
+    th {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #64748b;
+      background: rgba(15, 23, 42, 0.04);
+    }
+    tbody tr:last-child td {
+      border-bottom: none;
+    }
+    tbody tr:hover {
+      background: rgba(59, 127, 190, 0.08);
+    }
+    code {
+      background: rgba(15, 23, 42, 0.08);
+      color: #1f2937;
+      border-radius: 6px;
+      padding: 2px 6px;
+      font-size: 12px;
+    }
+    .label-pill {
+      display: inline-flex;
+      align-items: center;
+      background: rgba(59, 127, 190, 0.18);
+      color: #1e3a5f;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .actions {
+      display: flex;
+      gap: 12px;
+    }
+    .btn-link {
+      border: none;
+      background: transparent;
+      font-size: 13px;
+      font-weight: 600;
+      color: #1d4ed8;
+      cursor: pointer;
+      padding: 0;
+    }
+    .btn-link:hover {
+      text-decoration: underline;
+    }
+    .btn-link.delete {
+      color: #b3261e;
+    }
+    .muted {
+      color: #94a3b8;
+    }
+    .status {
+      margin: 18px 4px 0;
+      font-size: 13px;
+      color: #475569;
+    }
+    @media (max-width: 720px) {
+      .controls {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .controls__group {
+        justify-content: flex-start;
+      }
+      table {
+        min-width: 520px;
+      }
+    }
+  </style>
+</head>
+<body>
+  ${navHtml}
+  <div class="page">
+    ${userMenuHtml}
+    <header class="hero">
+      <div class="hero__text">
+        <h1 class="hero__title">Terminal Directory</h1>
+        <p class="hero__subtitle">Manage terminal IDs and labels used by the Print Bridge.</p>
+      </div>
+      <div class="hero__actions">
+        <a class="hero__link" href="/ui">← Back to Printers</a>
+      </div>
+    </header>
+    <section class="card">
+      <div class="controls">
+        <div class="controls__group">
+          <button id="refresh" class="btn-outline" type="button">Refresh</button>
+          <button id="add-terminal" class="btn-primary" type="button">Add Terminal</button>
+        </div>
+        <span id="summary" class="controls__summary muted"></span>
+      </div>
+      <div class="table-wrapper">
+        <table id="terminal-table">
+          <thead>
+            <tr>
+              <th>Terminal ID</th>
+              <th>Label</th>
+              <th>Assigned Printer</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td colspan="4" class="muted">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="status" id="status"></p>
+    </section>
+  </div>
+  <script>
+    const userMenuEl = document.querySelector('.user-menu');
+    const userMenuTrigger = userMenuEl ? userMenuEl.querySelector('.user-menu__trigger') : null;
+    const logoutRedirectInput = userMenuEl ? userMenuEl.querySelector('form[action="/logout"] input[name="redirect"]') : null;
+    if (logoutRedirectInput) {
+      const currentPath = (window.location.pathname || '/ui/terminals') + (window.location.search || '');
+      logoutRedirectInput.value = encodeURIComponent(currentPath || '/ui/terminals');
+    }
+    const closeUserMenu = () => {
+      if (!userMenuEl || !userMenuTrigger) return;
+      userMenuEl.classList.remove('is-open');
+      userMenuTrigger.setAttribute('aria-expanded', 'false');
+    };
+    const toggleUserMenu = () => {
+      if (!userMenuEl || !userMenuTrigger) return;
+      const willOpen = !userMenuEl.classList.contains('is-open');
+      if (willOpen) {
+        userMenuEl.classList.add('is-open');
+        userMenuTrigger.setAttribute('aria-expanded', 'true');
+      } else {
+        closeUserMenu();
+      }
+    };
+    if (userMenuEl && userMenuTrigger) {
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') closeUserMenu();
+      });
+    }
+
+    const tblBody = document.querySelector('#terminal-table tbody');
+    const statusEl = document.getElementById('status');
+    const summaryEl = document.getElementById('summary');
+    const refreshBtn = document.getElementById('refresh');
+    const addBtn = document.getElementById('add-terminal');
+    let terminals = [];
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function renderTerminals(list) {
+      if (!Array.isArray(list) || list.length === 0) {
+        tblBody.innerHTML = '<tr><td colspan="4" class="muted">No terminals found.</td></tr>';
+        summaryEl.textContent = '0 terminals';
+        return;
+      }
+      const rows = list.map((item) => {
+        const safeId = escapeHtml(item.terminalId || '');
+        const label = typeof item.label === 'string' && item.label.length > 0 ? escapeHtml(item.label) : '';
+        const assigned = item.assignedIp ? '<code>' + escapeHtml(item.assignedIp) + '</code>' : '<span class="muted">—</span>';
+        const labelCell = label ? '<span class="label-pill">' + label + '</span>' : '<span class="muted">No label</span>';
+        return '<tr data-id="' + safeId + '">' +
+          '<td><code>' + safeId + '</code></td>' +
+          '<td>' + labelCell + '</td>' +
+          '<td>' + assigned + '</td>' +
+          '<td class="actions">' +
+            '<button type="button" class="btn-link edit" data-action="edit" data-id="' + safeId + '">Edit</button>' +
+            '<button type="button" class="btn-link delete" data-action="delete" data-id="' + safeId + '">Delete</button>' +
+          '</td>' +
+        '</tr>';
+      }).join('');
+      tblBody.innerHTML = rows;
+      const count = list.length;
+      summaryEl.textContent = count + ' terminal' + (count === 1 ? '' : 's');
+    }
+
+    async function loadTerminals() {
+      statusEl.textContent = 'Loading terminals…';
+      try {
+        const res = await fetch('/api/terminals', { headers: { 'Accept': 'application/json' } });
+        if (!res.ok) {
+          throw new Error('Request failed (' + res.status + ')');
+        }
+        const data = await res.json();
+        terminals = Array.isArray(data.terminals) ? data.terminals : [];
+        renderTerminals(terminals);
+        statusEl.textContent = 'Loaded ' + terminals.length + ' terminal' + (terminals.length === 1 ? '' : 's') + '.';
+      } catch (err) {
+        statusEl.textContent = 'Load failed: ' + (err && err.message ? err.message : String(err));
+      }
+    }
+
+    async function createTerminal() {
+      const idValue = window.prompt('Enter new terminal ID:');
+      if (idValue === null) return;
+      const terminalId = String(idValue).trim();
+      if (!terminalId) {
+        window.alert('Terminal ID is required.');
+        return;
+      }
+      const labelValue = window.prompt('Enter label for ' + terminalId + ' (optional):', '');
+      if (labelValue === null) return;
+      const label = String(labelValue).trim();
+      statusEl.textContent = 'Creating terminal…';
+      try {
+        const res = await fetch('/terminals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ terminalId, label })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) {
+          throw new Error((data && data.error) || 'Request failed (' + res.status + ')');
+        }
+        terminals = Array.isArray(data.terminals) ? data.terminals : terminals;
+        renderTerminals(terminals);
+        statusEl.textContent = 'Terminal ' + terminalId + ' created.';
+      } catch (err) {
+        statusEl.textContent = 'Create failed: ' + (err && err.message ? err.message : String(err));
+      }
+    }
+
+    async function saveTerminalLabel(id, label) {
+      if (!id) return;
+      statusEl.textContent = 'Saving label…';
+      try {
+        const res = await fetch('/terminals/' + encodeURIComponent(id), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) {
+          throw new Error((data && data.error) || 'Request failed (' + res.status + ')');
+        }
+        terminals = Array.isArray(data.terminals) ? data.terminals : terminals;
+        renderTerminals(terminals);
+        statusEl.textContent = 'Label updated for ' + id + '.';
+      } catch (err) {
+        statusEl.textContent = 'Update failed: ' + (err && err.message ? err.message : String(err));
+      }
+    }
+
+    async function deleteTerminal(id) {
+      if (!id) return;
+      const confirmed = window.confirm('Delete terminal ' + id + '? This will also remove existing assignments.');
+      if (!confirmed) return;
+      statusEl.textContent = 'Deleting terminal…';
+      try {
+        const res = await fetch('/terminals/' + encodeURIComponent(id), {
+          method: 'DELETE',
+          headers: { 'Accept': 'application/json' }
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) {
+          throw new Error((data && data.error) || 'Request failed (' + res.status + ')');
+        }
+        terminals = Array.isArray(data.terminals) ? data.terminals : terminals;
+        renderTerminals(terminals);
+        statusEl.textContent = 'Terminal ' + id + ' deleted.';
+      } catch (err) {
+        statusEl.textContent = 'Delete failed: ' + (err && err.message ? err.message : String(err));
+      }
+    }
+
+    document.addEventListener('click', (event) => {
+      if (userMenuEl && userMenuTrigger) {
+        const triggerMatch = event.target.closest('.user-menu__trigger');
+        if (triggerMatch) {
+          event.preventDefault();
+          toggleUserMenu();
+          return;
+        }
+        const menuItem = event.target.closest('.user-menu__link');
+        if (menuItem) {
+          closeUserMenu();
+        } else if (userMenuEl.classList.contains('is-open') && !event.target.closest('.user-menu')) {
+          closeUserMenu();
+        }
+      }
+      const actionBtn = event.target.closest('button[data-action]');
+      if (actionBtn) {
+        const id = actionBtn.getAttribute('data-id') || '';
+        const action = actionBtn.getAttribute('data-action');
+        if (!id || !action) return;
+        if (action === 'edit') {
+          const entry = terminals.find((item) => item.terminalId === id);
+          const currentLabel = entry ? entry.label || '' : '';
+          const next = window.prompt('Update label for ' + id + ':', currentLabel);
+          if (next === null) return;
+          saveTerminalLabel(id, String(next).trim());
+        } else if (action === 'delete') {
+          deleteTerminal(id);
+        }
+      }
+    });
+
+    refreshBtn.addEventListener('click', () => loadTerminals());
+    addBtn.addEventListener('click', () => createTerminal());
+
+    loadTerminals();
+  </script>
+</body>
+</html>`;
+    res.set('Content-Type', 'text/html');
+    res.send(html);
+});
+
 // GET /printers - discover printers on the network
 // Query params:
 //   cidr: optional, e.g., 192.168.1.0/24 (defaults to interface-derived)
@@ -1888,6 +3027,69 @@ app.get('/printers', async (req, res) => {
         logger.error('GET /printers failed', { error: err.message });
         res.status(500).json({ error: err.message });
     }
+});
+
+app.get('/api/terminals', authorizeApi, (req, res) => {
+    const terminals = collectTerminals();
+    res.json({ terminals });
+});
+
+app.post('/terminals', authorizeApi, (req, res) => {
+    const terminalIdRaw = typeof req.body?.terminalId === 'string' ? req.body.terminalId : '';
+    const terminalId = terminalIdRaw.trim();
+    if (!terminalId) {
+        return res.status(400).json({ error: 'terminalId is required' });
+    }
+    const labelRaw = typeof req.body?.label === 'string' ? req.body.label : '';
+    const label = labelRaw.trim();
+    const existingLabels = getAllTerminalLabels();
+    if (Object.prototype.hasOwnProperty.call(existingLabels, terminalId)) {
+        return res.status(409).json({ error: 'Terminal already exists', terminalId });
+    }
+    setTerminalLabel(terminalId, label);
+    logger.info('Terminal created', { terminalId, label });
+    const terminals = collectTerminals();
+    const terminal = terminals.find((entry) => entry.terminalId === terminalId) || null;
+    res.json({ ok: true, terminal, terminals });
+});
+
+app.patch('/terminals/:terminalId', authorizeApi, (req, res) => {
+    const terminalParam = typeof req.params?.terminalId === 'string' ? req.params.terminalId : '';
+    const terminalId = terminalParam.trim();
+    if (!terminalId) {
+        return res.status(400).json({ error: 'terminalId is required' });
+    }
+    const labelRaw = typeof req.body?.label === 'string' ? req.body.label : '';
+    const label = labelRaw.trim();
+    setTerminalLabel(terminalId, label);
+    logger.info('Terminal label saved', { terminalId, label });
+    const terminals = collectTerminals();
+    const terminal = terminals.find((entry) => entry.terminalId === terminalId) || null;
+    res.json({ ok: true, terminal, terminals });
+});
+
+app.delete('/terminals/:terminalId', authorizeApi, (req, res) => {
+    const terminalParam = typeof req.params?.terminalId === 'string' ? req.params.terminalId : '';
+    const terminalId = terminalParam.trim();
+    if (!terminalId) {
+        return res.status(400).json({ error: 'terminalId is required' });
+    }
+    const before = collectTerminals();
+    const exists = before.some((entry) => entry.terminalId === terminalId);
+    if (!exists) {
+        return res.status(404).json({ error: 'Terminal not found', terminalId });
+    }
+    removeTerminalLabel(terminalId);
+    let removedIp = null;
+    try {
+        const removal = removePrinterIp(terminalId);
+        removedIp = Object.prototype.hasOwnProperty.call(removal, 'removedIp') ? removal.removedIp ?? null : null;
+    } catch (err) {
+        logger.warn('Failed to remove printer mapping during terminal delete', { terminalId, error: err.message });
+    }
+    logger.info('Terminal removed', { terminalId, removedIp });
+    const terminals = collectTerminals();
+    res.json({ ok: true, terminalId, removedIp, terminals });
 });
 
 function sendToPrinter(ip, buffer, timeoutMs = 10000) {

@@ -94,6 +94,14 @@ The following endpoints require a JWT verifiable with `JWT_SECRET`. Supply it us
 
 - `POST /print`
 - `POST /assign`
+- `GET /api/printers`
+- `POST /printers`
+- `PATCH /printers/:ip`
+- `DELETE /printers/:ip`
+- `GET /api/terminals`
+- `POST /terminals`
+- `PATCH /terminals/:terminalId`
+- `DELETE /terminals/:terminalId`
 
 Note: `/ui` and `/printers` are unauthenticated so the UI can load discovery results without extra configuration.
 
@@ -103,18 +111,35 @@ Note: `/ui` and `/printers` are unauthenticated so the UI can load discovery res
 
 - `GET /health` — Health check
 - `GET /ui` — Minimal web UI for discovery and mapping
+- `GET /ui/printers` — UI directory focused on printer labels and usage
+- `GET /ui/terminals` — UI to manage terminal IDs and labels
 - `GET /printers` — Returns discovered printers
 - `POST /assign` — Body `{ terminalId, ip }` (JWT)
 - `POST /print` — Body `{ terminalId, data }` with `data` base64 (JWT)
+- `GET /api/printers` — JSON list of printers with label + assignment data (JWT or UI session)
+- `POST /printers` — Body `{ ip, label }` to create/label printer (JWT or UI session)
+- `PATCH /printers/:ip` — Body `{ label }` to edit printer label (JWT or UI session)
+- `DELETE /printers/:ip` — Remove printer label and clear assignments (JWT or UI session)
+- `GET /api/terminals` — JSON list of terminals (JWT or UI session)
+- `POST /terminals` — Body `{ terminalId, label }` to create/update (JWT or UI session)
+- `PATCH /terminals/:terminalId` — Body `{ label }` to edit terminal label (JWT or UI session)
+- `DELETE /terminals/:terminalId` — Remove terminal + mapping (JWT or UI session)
 
 Examples:
 
 - List printers:
   - `curl -k https://localhost:8443/printers`
+- Manage printers:
+  - `curl -k -H "X-Authorization: Bearer <JWT>" https://localhost:8443/api/printers`
+  - `curl -k -H "X-Authorization: Bearer <JWT>" -H "Content-Type: application/json" -d '{"ip":"192.168.1.60","label":"Kitchen"}' https://localhost:8443/printers`
+- List terminals:
+  - `curl -k -H "X-Authorization: Bearer <JWT>" https://localhost:8443/api/terminals`
 - Assign mapping:
   - `curl -k -H "X-Authorization: Bearer <JWT>" -H "Content-Type: application/json" -d '{"terminalId":"t1","ip":"192.168.1.50"}' https://localhost:8443/assign`
 - Print job:
   - `curl -k -H "X-Authorization: Bearer <JWT>" -H "Content-Type: application/json" -d '{"terminalId":"t1","data":"<base64-escpos>"}' https://localhost:8443/print`
+- Create terminal:
+  - `curl -k -H "X-Authorization: Bearer <JWT>" -H "Content-Type: application/json" -d '{"terminalId":"t1","label":"Front Counter"}' https://localhost:8443/terminals`
 
 ---
 
