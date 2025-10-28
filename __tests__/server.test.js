@@ -23,6 +23,7 @@ describe('server endpoints', () => {
   const { app } = require('../server');
   const token = jwt.sign({ sub: 'tester' }, process.env.JWT_SECRET);
   const auth = { Authorization: `Bearer ${token}` };
+  const xAuth = { 'X-Authorization': `Bearer ${token}` };
 
   test('GET /health is ok', async () => {
     await request(app).get('/health').expect(200);
@@ -39,6 +40,14 @@ describe('server endpoints', () => {
     expect(res.body.ok).toBe(true);
     const onDisk = JSON.parse(fs.readFileSync(mapFile, 'utf8'));
     expect(onDisk['t2']).toBe('192.168.1.55');
+  });
+
+  test('POST /assign accepts X-Authorization header', async () => {
+    const res = await request(app).post('/assign').set(xAuth).send({ terminalId: 't3', ip: '192.168.1.56' });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    const onDisk = JSON.parse(fs.readFileSync(mapFile, 'utf8'));
+    expect(onDisk['t3']).toBe('192.168.1.56');
   });
 
   test('GET /printers triggers discovery on refresh without auth', async () => {

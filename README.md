@@ -90,7 +90,7 @@ Certificates: server reads `key.pem` and `cert.pem` from the repo root.
 
 ## 🔐 Authentication
 
-The following endpoints require `Authorization: Bearer <jwt>` verifiable with `JWT_SECRET`:
+The following endpoints require a JWT verifiable with `JWT_SECRET`. Supply it using either the standard `Authorization: Bearer <jwt>` header or the custom `X-Authorization: Bearer <jwt>` header:
 
 - `POST /print`
 - `POST /assign`
@@ -112,9 +112,9 @@ Examples:
 - List printers:
   - `curl -k https://localhost:8443/printers`
 - Assign mapping:
-  - `curl -k -H "Authorization: Bearer <JWT>" -H "Content-Type: application/json" -d '{"terminalId":"t1","ip":"192.168.1.50"}' https://localhost:8443/assign`
+  - `curl -k -H "X-Authorization: Bearer <JWT>" -H "Content-Type: application/json" -d '{"terminalId":"t1","ip":"192.168.1.50"}' https://localhost:8443/assign`
 - Print job:
-  - `curl -k -H "Authorization: Bearer <JWT>" -H "Content-Type: application/json" -d '{"terminalId":"t1","data":"<base64-escpos>"}' https://localhost:8443/print`
+  - `curl -k -H "X-Authorization: Bearer <JWT>" -H "Content-Type: application/json" -d '{"terminalId":"t1","data":"<base64-escpos>"}' https://localhost:8443/print`
 
 ---
 

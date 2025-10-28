@@ -62,7 +62,7 @@ const corsOptions = {
         return callback(new Error('Not allowed by CORS'));
     },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Authorization', 'Accept'],
     credentials: true,
     maxAge: 86400,
     optionsSuccessStatus: 204,
@@ -719,6 +719,24 @@ function renderProfilePage({ username = '', error = '', success = '' } = {}) {
 </html>`;
 }
 
+function getAuthHeader(req) {
+    if (!req || !req.headers) return '';
+    return req.headers['authorization'] ||
+        req.headers['Authorization'] ||
+        req.headers['x-authorization'] ||
+        req.headers['X-Authorization'] ||
+        '';
+}
+
+function extractBearerToken(headerValue) {
+    if (!headerValue || typeof headerValue !== 'string') return '';
+    const trimmed = headerValue.trim();
+    if (/^Bearer\s+/i.test(trimmed)) {
+        return trimmed.replace(/^Bearer\s+/i, '').trim();
+    }
+    return trimmed;
+}
+
 function requireUiAuth(req, res, next) {
     const { enabled } = getUiAuthState();
     if (!enabled) return next();
@@ -732,13 +750,13 @@ function requireUiAuth(req, res, next) {
 }
 
 function authorizeApi(req, res, next) {
-    const header = req.headers['authorization'] || req.headers['Authorization'];
-    if (header && /^Bearer\s+/i.test(header)) {
+    const header = getAuthHeader(req);
+    const token = extractBearerToken(header);
+    if (token) {
         if (!JWT_SECRET) {
             logger.error('JWT_SECRET not set; rejecting API auth request');
             return res.status(401).json({ error: 'Unauthorized: server not configured' });
         }
-        const token = header.split(/\s+/)[1];
         return jwt.verify(token, JWT_SECRET, (err, payload) => {
             if (err) {
                 return res.status(401).json({ error: 'Unauthorized: invalid token' });
@@ -2114,18 +2132,18 @@ if (require.main === module && process.env.NODE_ENV !== 'test') {
     boot();
 }
 // Authentication middleware (JWT)
-// Requires Authorization: Bearer <token> header. Verifies with JWT_SECRET.
+// Requires Authorization or X-Authorization: Bearer <token> header. Verifies with JWT_SECRET.
 function authenticateToken(req, res, next) {
     try {
-        const header = req.headers['authorization'] || req.headers['Authorization'];
-        if (!header || !/^Bearer\s+/i.test(header)) {
-            return res.status(401).json({ error: 'Unauthorized: missing Bearer token' });
+        const header = getAuthHeader(req);
+        const token = extractBearerToken(header);
+        if (!token) {
+            return res.status(401).json({ error: 'Unauthorized: missing token' });
         }
         if (!JWT_SECRET) {
             logger.error('JWT_SECRET not set; rejecting auth request');
             return res.status(401).json({ error: 'Unauthorized: server not configured' });
         }
-        const token = header.split(/\s+/)[1];
         jwt.verify(token, JWT_SECRET, (err, payload) => {
             if (err) {
                 return res.status(401).json({ error: 'Unauthorized: invalid token' });
