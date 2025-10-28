@@ -380,9 +380,10 @@ function renderLoginPage({ redirectTo = '/ui', error = '' } = {}) {
 </html>`;
 }
 
-function renderProfilePage({ username = '', error = '', success = '', navHtml = '' } = {}) {
+function renderProfilePage({ username = '', error = '', success = '', navHtml = '', userMenuHtml = '' } = {}) {
     const safeUsername = escapeHtmlLite(username);
     const messageBlock = error ? `<div class="notice notice--error"><strong>Update failed.</strong> ${escapeHtmlLite(error)}</div>` : success ? `<div class="notice notice--success">${escapeHtmlLite(success)}</div>` : '';
+    const topbarSection = userMenuHtml ? `<div class="topbar">${userMenuHtml}</div>` : '';
     return `<!doctype html>
 <html lang="en">
 <head>
@@ -396,7 +397,6 @@ function renderProfilePage({ username = '', error = '', success = '', navHtml = 
   <link rel="apple-touch-icon" href="/assets/apple-touch-icon.webp" />
   <link rel="manifest" href="/assets/site.webmanifest" />
   <style>
-    ${GLOBAL_NAV_STYLES}
     :root { color-scheme: light; font-size: 16px; }
     * { box-sizing: border-box; }
     body {
@@ -416,6 +416,93 @@ function renderProfilePage({ username = '', error = '', success = '', navHtml = 
       border-radius: 20px;
       padding: 32px 34px;
       box-shadow: 0 22px 52px rgba(15, 31, 55, 0.32);
+    }
+    .topbar {
+      max-width: 480px;
+      margin: 0 auto 18px;
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+    }
+    .user-menu {
+      position: relative;
+    }
+    .user-menu__trigger {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid rgba(15, 27, 51, 0.12);
+      border-radius: 14px;
+      background: rgba(248, 251, 255, 0.9);
+      padding: 8px 14px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #0f172a;
+      cursor: pointer;
+      box-shadow: 0 10px 26px rgba(15, 31, 55, 0.18);
+      transition: transform 120ms ease, box-shadow 120ms ease;
+    }
+    .user-menu__trigger:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 12px 32px rgba(15, 31, 55, 0.22);
+    }
+    .user-menu__initials {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #3B7FBE 0%, #265785 100%);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .user-menu__caret {
+      font-size: 11px;
+      color: #64748b;
+    }
+    .user-menu__dropdown {
+      position: absolute;
+      top: calc(100% + 10px);
+      right: 0;
+      min-width: 180px;
+      background: #fff;
+      border-radius: 14px;
+      box-shadow: 0 24px 60px rgba(15, 31, 55, 0.26);
+      padding: 8px 0;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-6px);
+      transition: opacity 140ms ease, transform 140ms ease;
+      z-index: 10;
+    }
+    .user-menu.is-open .user-menu__dropdown {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+    .user-menu__dropdown form {
+      margin: 0;
+    }
+    .user-menu__link {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: transparent;
+      border: none;
+      padding: 10px 20px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #1e293b;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .user-menu__link:hover {
+      background: rgba(59, 127, 190, 0.12);
+    }
+    .user-menu__logout {
+      color: #b3261e;
     }
     .header {
       display: flex;
@@ -643,6 +730,7 @@ function renderProfilePage({ username = '', error = '', success = '', navHtml = 
 </head>
 <body>
   ${navHtml}
+  ${topbarSection}
   <div class="container">
     <div class="header">
       <h1 class="title">Edit profile</h1>
@@ -751,11 +839,7 @@ function renderProfilePage({ username = '', error = '', success = '', navHtml = 
 
 function getAuthHeader(req) {
     if (!req || !req.headers) return '';
-    return req.headers['authorization'] ||
-        req.headers['Authorization'] ||
-        req.headers['x-authorization'] ||
-        req.headers['X-Authorization'] ||
-        '';
+    return req.headers['authorization'] || req.headers['Authorization'] || req.headers['x-authorization'] || req.headers['X-Authorization'] || '';
 }
 
 function extractBearerToken(headerValue) {
@@ -883,6 +967,90 @@ const GLOBAL_NAV_STYLES = `
       color: #0f172a;
       background: rgba(15, 23, 42, 0.14);
     }
+    .user-menu {
+      position: relative;
+    }
+    .user-menu__trigger {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid rgba(15, 27, 51, 0.12);
+      border-radius: 14px;
+      background: rgba(248, 251, 255, 0.85);
+      padding: 8px 14px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #0f172a;
+      cursor: pointer;
+      box-shadow: 0 10px 26px rgba(15, 31, 55, 0.18);
+      transition: transform 120ms ease, box-shadow 120ms ease;
+    }
+    .user-menu__trigger:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 12px 32px rgba(15, 31, 55, 0.22);
+    }
+    .user-menu__initials {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #3B7FBE 0%, #265785 100%);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .user-menu__caret {
+      font-size: 11px;
+      color: #64748b;
+    }
+    .user-menu__name {
+      font-weight: 600;
+      color: #0f172a;
+    }
+    .user-menu__dropdown {
+      position: absolute;
+      top: calc(100% + 10px);
+      right: 0;
+      min-width: 180px;
+      background: #fff;
+      border-radius: 14px;
+      box-shadow: 0 24px 60px rgba(15, 31, 55, 0.26);
+      padding: 8px 0;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-6px);
+      transition: opacity 140ms ease, transform 140ms ease;
+      z-index: 10;
+    }
+    .user-menu.is-open .user-menu__dropdown {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+    .user-menu__dropdown form {
+      margin: 0;
+    }
+    .user-menu__link {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: transparent;
+      border: none;
+      padding: 10px 20px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #1e293b;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .user-menu__link:hover {
+      background: rgba(59, 127, 190, 0.12);
+    }
+    .user-menu__logout {
+      color: #b3261e;
+    }
 `;
 
 function normalizePathForNav(value) {
@@ -898,10 +1066,8 @@ function buildNavBar({ currentPath = '/', signedIn = false, userMenuHtml = '' } 
         const cls = isActive ? 'global-nav__link global-nav__link--active' : 'global-nav__link';
         return `<a class="${cls}" href="${link.href}">${link.label}</a>`;
     }).join('');
-    const actions = userMenuHtml || (signedIn
-        ? ''
-        : `<a class="global-nav__link" href="/login">Login</a>`);
-    return `<nav class="global-nav"><div class="global-nav__inner"><span class="global-nav__brand">TABL Bridge</span><div class="global-nav__links">${links}</div><div class="global-nav__actions">${actions}</div></div></nav>`;
+    const actions = userMenuHtml || (signedIn ? '' : `<a class="global-nav__link" href="/login">Login</a>`);
+    return `<nav class="global-nav"><div class="global-nav__inner"><span class="global-nav__brand">TABL Print Bridge</span><div class="global-nav__links">${links}</div><div class="global-nav__actions">${actions}</div></div></nav>`;
 }
 
 function requireUiAuth(req, res, next) {
@@ -1011,9 +1177,8 @@ app.get('/profile', requireUiAuth, (req, res) => {
     }
     const signedInUserRaw = typeof res.locals.uiUser === 'string' ? res.locals.uiUser : state.username;
     const userMenuHtml = buildUserMenu(state, signedInUserRaw);
-    const navHtml = buildNavBar({ currentPath: req.path, signedIn: true, userMenuHtml });
     res.set('Content-Type', 'text/html');
-    res.send(renderProfilePage({ username: state.username, navHtml }));
+    res.send(renderProfilePage({ username: state.username, userMenuHtml }));
 });
 
 app.post('/profile', requireUiAuth, (req, res) => {
@@ -1029,11 +1194,10 @@ app.post('/profile', requireUiAuth, (req, res) => {
     const confirmPassword = typeof req.body?.passwordConfirm === 'string' ? req.body.passwordConfirm : '';
 
     const respond = ({ status = 200, username = state.username, error, success }) => {
-        const signedInUserRaw = typeof res.locals.uiUser === 'string' ? res.locals.uiUser : state.username;
+        const signedInUserRaw = typeof res.locals.uiUser === 'string' ? res.locals.uiUser : username;
         const userMenuHtml = buildUserMenu(state, signedInUserRaw);
-        const navHtml = buildNavBar({ currentPath: '/profile', signedIn: true, userMenuHtml });
         res.status(status).set('Content-Type', 'text/html');
-        res.send(renderProfilePage({ username, error, success, navHtml }));
+        res.send(renderProfilePage({ username, error, success, userMenuHtml }));
     };
 
     if (intent === 'update-username') {
