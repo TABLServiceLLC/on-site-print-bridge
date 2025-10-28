@@ -19,7 +19,7 @@
 | Header Name        | Required | Format                         | Notes                                                                 |
 |--------------------|----------|--------------------------------|-----------------------------------------------------------------------|
 | `X-Authorization`  | Yes      | `Bearer <JWT>`                 | Must include the `Bearer` prefix followed by the encoded JWT token.   |
-| `Content-Type`     | Yes      | `application/json`             | For JSON request bodies (e.g., `/assign`, `/print`).                  |
+| `Content-Type`     | Yes      | `application/json`             | For JSON request bodies (e.g., `/assign`, `/print`, `/print/global`). |
 
 ### Example
 ```http
@@ -30,6 +30,15 @@ Content-Type: application/json
 {
   "terminalId": "t1",
   "ip": "192.168.1.50"
+}
+
+POST https://<bridge-host>/print/global
+X-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+Content-Type: application/json
+
+{
+  "printerId": "kitchen",
+  "data": "<base64-escpos>"
 }
 ```
 

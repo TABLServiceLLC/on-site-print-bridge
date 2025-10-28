@@ -19,6 +19,7 @@ const { getPrinterIp, setPrinterIp, getAllMappings, removePrinterIp } = require(
 const { scanNetwork, defaultCidrFromInterfaces } = require('./discoverPrinters');
 const { readCredentials, writeCredentials, CREDENTIALS_PATH } = require('./uiCredentials');
 const { getAllLabels, getAllPrinterLabels, getAllTerminalLabels, setPrinterLabel, removePrinterLabel, setTerminalLabel, removeTerminalLabel } = require('./printerLabels');
+const { getAllGlobalPrinters, getGlobalPrinter, setGlobalPrinter, removeGlobalPrinter } = require('./globalPrinters');
 const DISCOVERY_INTERVAL_MS = parseInt(process.env.DISCOVERY_INTERVAL_MS || '300000', 10); // 5 minutes
 const DISCOVERY_PORTS = [9100, 515, 631, 80, 443];
 const JWT_SECRET = process.env.JWT_SECRET || '';
@@ -194,22 +195,18 @@ function buildUserMenu(authState, signedInUserRaw) {
     if (typeof signedInUserRaw !== 'string' || !signedInUserRaw.trim()) return '';
     const sanitizedUserName = escapeHtmlLite(signedInUserRaw);
     const sanitizedInitials = escapeHtmlLite(getUserInitials(signedInUserRaw));
-    return `<div class="topbar">
-      <div class="topbar__actions">
-        <div class="user-menu" data-open="false">
-          <button class="user-menu__trigger" type="button" aria-haspopup="true" aria-expanded="false">
-            <span class="user-menu__initials">${sanitizedInitials}</span>
-            <span class="user-menu__name">${sanitizedUserName}</span>
-            <span class="user-menu__caret">&#9662;</span>
-          </button>
-          <div class="user-menu__dropdown" role="menu">
-            <a class="user-menu__link" href="/profile" role="menuitem">Edit profile</a>
-            <form method="POST" action="/logout" role="none">
-              <input type="hidden" name="redirect" value="/login" />
-              <button type="submit" class="user-menu__link user-menu__logout" role="menuitem">Log out</button>
-            </form>
-          </div>
-        </div>
+    return `<div class="user-menu" data-open="false">
+      <button class="user-menu__trigger" type="button" aria-haspopup="true" aria-expanded="false">
+        <span class="user-menu__initials">${sanitizedInitials}</span>
+        <span class="user-menu__name">${sanitizedUserName}</span>
+        <span class="user-menu__caret">&#9662;</span>
+      </button>
+      <div class="user-menu__dropdown" role="menu">
+        <a class="user-menu__link" href="/profile" role="menuitem">Edit profile</a>
+        <form method="POST" action="/logout" role="none">
+          <input type="hidden" name="redirect" value="/login" />
+          <button type="submit" class="user-menu__link user-menu__logout" role="menuitem">Log out</button>
+        </form>
       </div>
     </div>`;
 }
@@ -383,7 +380,7 @@ function renderLoginPage({ redirectTo = '/ui', error = '' } = {}) {
 </html>`;
 }
 
-function renderProfilePage({ username = '', error = '', success = '' } = {}) {
+function renderProfilePage({ username = '', error = '', success = '', navHtml = '' } = {}) {
     const safeUsername = escapeHtmlLite(username);
     const messageBlock = error ? `<div class="notice notice--error"><strong>Update failed.</strong> ${escapeHtmlLite(error)}</div>` : success ? `<div class="notice notice--success">${escapeHtmlLite(success)}</div>` : '';
     return `<!doctype html>
@@ -399,6 +396,7 @@ function renderProfilePage({ username = '', error = '', success = '' } = {}) {
   <link rel="apple-touch-icon" href="/assets/apple-touch-icon.webp" />
   <link rel="manifest" href="/assets/site.webmanifest" />
   <style>
+    ${GLOBAL_NAV_STYLES}
     :root { color-scheme: light; font-size: 16px; }
     * { box-sizing: border-box; }
     body {
@@ -644,6 +642,7 @@ function renderProfilePage({ username = '', error = '', success = '' } = {}) {
   </style>
 </head>
 <body>
+  ${navHtml}
   <div class="container">
     <div class="header">
       <h1 class="title">Edit profile</h1>
@@ -809,11 +808,25 @@ function collectPrinters() {
     });
 }
 
+function collectGlobalPrinters() {
+    const map = getAllGlobalPrinters() || {};
+    const entries = Object.entries(map);
+    entries.sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true, sensitivity: 'base' }));
+    return entries.map(([printerId, value]) => {
+        const ip = value && typeof value.ip === 'string' ? value.ip : '';
+        const label = value && typeof value.label === 'string' ? value.label : '';
+        return {
+            printerId,
+            ip,
+            label,
+        };
+    });
+}
+
 const NAV_LINKS = [
     { href: '/ui', label: 'Dashboard' },
     { href: '/ui/printers', label: 'Printers' },
     { href: '/ui/terminals', label: 'Terminals' },
-    { href: '/profile', label: 'Profile' },
 ];
 
 const GLOBAL_NAV_STYLES = `
@@ -847,6 +860,11 @@ const GLOBAL_NAV_STYLES = `
       align-items: center;
       justify-content: flex-end;
     }
+    .global-nav__actions {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
     .global-nav__link {
       text-decoration: none;
       font-size: 14px;
@@ -873,14 +891,17 @@ function normalizePathForNav(value) {
     return `/${value.replace(/^\/+/, '')}`;
 }
 
-function buildNavBar({ currentPath = '/', signedIn = false } = {}) {
+function buildNavBar({ currentPath = '/', signedIn = false, userMenuHtml = '' } = {}) {
     const normalized = normalizePathForNav(currentPath);
     const links = NAV_LINKS.map((link) => {
         const isActive = normalized === link.href || (link.href !== '/' && normalized.startsWith(`${link.href}/`));
         const cls = isActive ? 'global-nav__link global-nav__link--active' : 'global-nav__link';
         return `<a class="${cls}" href="${link.href}">${link.label}</a>`;
     }).join('');
-    return `<nav class="global-nav"><div class="global-nav__inner"><span class="global-nav__brand">TABL Bridge</span><div class="global-nav__links">${links}</div></div></nav>`;
+    const actions = userMenuHtml || (signedIn
+        ? ''
+        : `<a class="global-nav__link" href="/login">Login</a>`);
+    return `<nav class="global-nav"><div class="global-nav__inner"><span class="global-nav__brand">TABL Bridge</span><div class="global-nav__links">${links}</div><div class="global-nav__actions">${actions}</div></div></nav>`;
 }
 
 function requireUiAuth(req, res, next) {
@@ -988,8 +1009,11 @@ app.get('/profile', requireUiAuth, (req, res) => {
     if (!state.enabled) {
         return res.redirect('/ui');
     }
+    const signedInUserRaw = typeof res.locals.uiUser === 'string' ? res.locals.uiUser : state.username;
+    const userMenuHtml = buildUserMenu(state, signedInUserRaw);
+    const navHtml = buildNavBar({ currentPath: req.path, signedIn: true, userMenuHtml });
     res.set('Content-Type', 'text/html');
-    res.send(renderProfilePage({ username: state.username }));
+    res.send(renderProfilePage({ username: state.username, navHtml }));
 });
 
 app.post('/profile', requireUiAuth, (req, res) => {
@@ -1005,8 +1029,11 @@ app.post('/profile', requireUiAuth, (req, res) => {
     const confirmPassword = typeof req.body?.passwordConfirm === 'string' ? req.body.passwordConfirm : '';
 
     const respond = ({ status = 200, username = state.username, error, success }) => {
+        const signedInUserRaw = typeof res.locals.uiUser === 'string' ? res.locals.uiUser : state.username;
+        const userMenuHtml = buildUserMenu(state, signedInUserRaw);
+        const navHtml = buildNavBar({ currentPath: '/profile', signedIn: true, userMenuHtml });
         res.status(status).set('Content-Type', 'text/html');
-        res.send(renderProfilePage({ username, error, success }));
+        res.send(renderProfilePage({ username, error, success, navHtml }));
     };
 
     if (intent === 'update-username') {
@@ -1143,7 +1170,7 @@ app.get('/ui', requireUiAuth, (req, res) => {
     const authState = getUiAuthState();
     const signedInUserRaw = typeof res.locals.uiUser === 'string' ? res.locals.uiUser : authState.enabled ? authState.username : '';
     const userMenuHtml = buildUserMenu(authState, signedInUserRaw);
-    const navHtml = buildNavBar({ currentPath: req.path, signedIn: Boolean(signedInUserRaw) });
+    const navHtml = buildNavBar({ currentPath: req.path, signedIn: Boolean(signedInUserRaw), userMenuHtml });
     const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -1176,12 +1203,6 @@ app.get('/ui', requireUiAuth, (req, res) => {
       max-width: 1200px;
       margin: 0 auto;
       padding: 48px 24px 64px;
-    }
-    .topbar {
-      display: flex;
-      justify-content: flex-end;
-      align-items: center;
-      margin-bottom: 24px;
     }
     .user-menu {
       position: relative;
@@ -1523,7 +1544,6 @@ app.get('/ui', requireUiAuth, (req, res) => {
 <body>
   ${navHtml}
   <div class="page">
-    ${userMenuHtml}
     <header class="hero">
       <img class="hero__logo" src="/assets/TABL_Logo.svg" alt="TABL" />
       <div>
@@ -1992,11 +2012,85 @@ app.delete('/printers/:ip', authorizeApi, (req, res) => {
     res.json({ ok: true, ip, removedTerminals, printers });
 });
 
+app.get('/api/global-printers', authorizeApi, (req, res) => {
+    const printers = collectGlobalPrinters();
+    res.json({ printers });
+});
+
+app.post('/global-printers', authorizeApi, (req, res) => {
+    const printerIdRaw = typeof req.body?.printerId === 'string' ? req.body.printerId : '';
+    const printerId = printerIdRaw.trim();
+    if (!printerId) {
+        return res.status(400).json({ error: 'printerId is required' });
+    }
+    const ipRaw = typeof req.body?.ip === 'string' ? req.body.ip : '';
+    const ip = ipRaw.trim();
+    if (!ip || net.isIP(ip) === 0) {
+        return res.status(400).json({ error: 'ip must be a valid IPv4/IPv6 address' });
+    }
+    const labelRaw = typeof req.body?.label === 'string' ? req.body.label : '';
+    const label = labelRaw.trim();
+    if (getGlobalPrinter(printerId)) {
+        return res.status(409).json({ error: 'Global printer already exists', printerId });
+    }
+    setGlobalPrinter(printerId, ip, label);
+    logger.info('Global printer saved', { printerId, ip, label });
+    const printers = collectGlobalPrinters();
+    const printer = printers.find((entry) => entry.printerId === printerId) || null;
+    res.json({ ok: true, printer, printers });
+});
+
+app.patch('/global-printers/:printerId', authorizeApi, (req, res) => {
+    const printerIdParam = typeof req.params?.printerId === 'string' ? req.params.printerId : '';
+    const printerId = printerIdParam.trim();
+    if (!printerId) {
+        return res.status(400).json({ error: 'printerId is required' });
+    }
+    const existing = getGlobalPrinter(printerId);
+    if (!existing) {
+        return res.status(404).json({ error: 'Global printer not found', printerId });
+    }
+    const ipProvided = typeof req.body?.ip === 'string';
+    const labelProvided = typeof req.body?.label === 'string';
+    if (!ipProvided && !labelProvided) {
+        return res.status(400).json({ error: 'Nothing to update' });
+    }
+    let nextIp = existing.ip;
+    if (ipProvided) {
+        const ipCandidate = req.body.ip.trim();
+        if (!ipCandidate || net.isIP(ipCandidate) === 0) {
+            return res.status(400).json({ error: 'ip must be a valid IPv4/IPv6 address' });
+        }
+        nextIp = ipCandidate;
+    }
+    const nextLabel = labelProvided ? req.body.label.trim() : existing.label || '';
+    setGlobalPrinter(printerId, nextIp, nextLabel);
+    logger.info('Global printer updated', { printerId, ip: nextIp, label: nextLabel });
+    const printers = collectGlobalPrinters();
+    const printer = printers.find((entry) => entry.printerId === printerId) || null;
+    res.json({ ok: true, printer, printers });
+});
+
+app.delete('/global-printers/:printerId', authorizeApi, (req, res) => {
+    const printerIdParam = typeof req.params?.printerId === 'string' ? req.params.printerId : '';
+    const printerId = printerIdParam.trim();
+    if (!printerId) {
+        return res.status(400).json({ error: 'printerId is required' });
+    }
+    const removal = removeGlobalPrinter(printerId);
+    if (!removal.removed) {
+        return res.status(404).json({ error: 'Global printer not found', printerId });
+    }
+    logger.info('Global printer removed', { printerId, ip: removal.removed.ip || null });
+    const printers = collectGlobalPrinters();
+    res.json({ ok: true, printerId, printers });
+});
+
 app.get('/ui/printers', requireUiAuth, (req, res) => {
     const authState = getUiAuthState();
     const signedInUserRaw = typeof res.locals.uiUser === 'string' ? res.locals.uiUser : authState.enabled ? authState.username : '';
     const userMenuHtml = buildUserMenu(authState, signedInUserRaw);
-    const navHtml = buildNavBar({ currentPath: req.path, signedIn: Boolean(signedInUserRaw) });
+    const navHtml = buildNavBar({ currentPath: req.path, signedIn: Boolean(signedInUserRaw), userMenuHtml });
     const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -2228,7 +2322,6 @@ app.get('/ui/printers', requireUiAuth, (req, res) => {
 <body>
   ${navHtml}
   <div class="page">
-    ${userMenuHtml}
     <header class="hero">
       <div class="hero__text">
         <h1 class="hero__title">Printer Directory</h1>
@@ -2481,7 +2574,7 @@ app.get('/ui/terminals', requireUiAuth, (req, res) => {
     const authState = getUiAuthState();
     const signedInUserRaw = typeof res.locals.uiUser === 'string' ? res.locals.uiUser : authState.enabled ? authState.username : '';
     const userMenuHtml = buildUserMenu(authState, signedInUserRaw);
-    const navHtml = buildNavBar({ currentPath: req.path, signedIn: Boolean(signedInUserRaw) });
+    const navHtml = buildNavBar({ currentPath: req.path, signedIn: Boolean(signedInUserRaw), userMenuHtml });
     const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -2514,12 +2607,6 @@ app.get('/ui/terminals', requireUiAuth, (req, res) => {
       max-width: 960px;
       margin: 0 auto;
       padding: 48px 24px 64px;
-    }
-    .topbar {
-      display: flex;
-      justify-content: flex-end;
-      align-items: center;
-      margin-bottom: 24px;
     }
     .hero {
       display: flex;
@@ -2698,7 +2785,6 @@ app.get('/ui/terminals', requireUiAuth, (req, res) => {
 <body>
   ${navHtml}
   <div class="page">
-    ${userMenuHtml}
     <header class="hero">
       <div class="hero__text">
         <h1 class="hero__title">Terminal Directory</h1>
@@ -3189,6 +3275,38 @@ app.post('/print', authenticateToken, async (req, res) => {
     } catch (err) {
         logger.error('Direct print failed', { terminalId, ip, error: err.message });
         return res.status(502).json({ ok: false, error: err.message, terminalId, ip });
+    }
+});
+
+// POST /print/global { printerId, data } where data is base64-encoded ESC/POS bytes
+app.post('/print/global', authenticateToken, async (req, res) => {
+    const printerIdRaw = typeof req.body?.printerId === 'string' ? req.body.printerId : '';
+    const printerId = printerIdRaw.trim();
+    const data = req.body?.data;
+    if (!printerId || typeof data !== 'string') {
+        return res.status(400).json({ error: 'printerId and data (base64) are required' });
+    }
+    const printer = getGlobalPrinter(printerId);
+    if (!printer || !printer.ip || net.isIP(printer.ip) === 0) {
+        return res.status(404).json({ error: 'Global printer not found', printerId });
+    }
+    let payload;
+    try {
+        payload = Buffer.from(data, 'base64');
+    } catch (e) {
+        return res.status(400).json({ error: 'Invalid base64 data' });
+    }
+    if (!payload || payload.length === 0) {
+        return res.status(400).json({ error: 'Decoded payload is empty' });
+    }
+    try {
+        logger.info('Dispatching global print request', { printerId, ip: printer.ip, bytes: payload.length });
+        const result = await sendToPrinter(printer.ip, payload);
+        logger.info('Global print success', { printerId, ip: printer.ip, bytesSent: result.bytesWritten });
+        return res.json({ ok: true, printerId, ip: printer.ip, bytesSent: result.bytesWritten });
+    } catch (err) {
+        logger.error('Global print failed', { printerId, ip: printer.ip, error: err.message });
+        return res.status(502).json({ ok: false, error: err.message, printerId, ip: printer.ip });
     }
 });
 

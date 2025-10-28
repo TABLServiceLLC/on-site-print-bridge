@@ -3,6 +3,8 @@ const os = require('os');
 const path = require('path');
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
+const net = require('net');
+const { EventEmitter } = require('events');
 
 // Mock discoverPrinters before requiring server to control scanning
 jest.mock('../discoverPrinters.js', () => ({
@@ -16,13 +18,16 @@ describe('server endpoints', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pb-server-'));
   const mapFile = path.join(tmpDir, 'printerMap.json');
   const labelsFile = path.join(tmpDir, 'printerLabels.json');
+  const globalPrintersFile = path.join(tmpDir, 'globalPrinters.json');
 
   process.env.NODE_ENV = 'test';
   process.env.JWT_SECRET = 'testsecret';
   process.env.PRINTER_MAP_FILE = mapFile;
   process.env.PRINTER_LABELS_FILE = labelsFile;
+  process.env.GLOBAL_PRINTERS_FILE = globalPrintersFile;
 
-  const { app } = require('../server');
+  const serverModule = require('../server');
+  const { app } = serverModule;
   const token = jwt.sign({ sub: 'tester' }, process.env.JWT_SECRET);
   const auth = { Authorization: `Bearer ${token}` };
   const xAuth = { 'X-Authorization': `Bearer ${token}` };
@@ -119,5 +124,58 @@ describe('server endpoints', () => {
     expect(finalPrinters.find((p) => p.ip === '192.168.1.200')).toBeUndefined();
 
     await request(app).delete('/terminals/unit-aux').set(auth).expect(200);
+  });
+
+  test('global printer endpoints support CRUD and printing', async () => {
+    const createConnectionSpy = jest.spyOn(net, 'createConnection').mockImplementation(() => {
+      const socket = new EventEmitter();
+      socket.bytesWritten = 0;
+      socket.setTimeout = () => {};
+      socket.write = (buffer, cb) => {
+        socket.bytesWritten += buffer.length;
+        if (typeof cb === 'function') cb();
+        setImmediate(() => socket.emit('close', false));
+      };
+      socket.end = () => {
+        setImmediate(() => socket.emit('close', false));
+      };
+      socket.destroy = () => {};
+      setImmediate(() => socket.emit('connect'));
+      return socket;
+    });
+
+    let res = await request(app).get('/api/global-printers').set(auth);
+    expect(res.status).toBe(200);
+    const initialCount = Array.isArray(res.body.printers) ? res.body.printers.length : 0;
+
+    res = await request(app).post('/global-printers').set(auth).send({ printerId: 'kitchen', ip: '192.168.1.210', label: 'Kitchen' });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.printer).toMatchObject({ printerId: 'kitchen', ip: '192.168.1.210', label: 'Kitchen' });
+
+    res = await request(app).patch('/global-printers/kitchen').set(auth).send({ label: 'Kitchen Main' });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.printer).toMatchObject({ printerId: 'kitchen', label: 'Kitchen Main' });
+
+    const data = Buffer.from('test payload', 'utf8').toString('base64');
+    res = await request(app).post('/print/global').set(auth).send({ printerId: 'kitchen', data });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body).toMatchObject({ printerId: 'kitchen', ip: '192.168.1.210' });
+    expect(createConnectionSpy).toHaveBeenCalledWith({ host: '192.168.1.210', port: 9100 });
+
+    res = await request(app).delete('/global-printers/kitchen').set(auth);
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.printerId).toBe('kitchen');
+
+    res = await request(app).get('/api/global-printers').set(auth);
+    expect(res.status).toBe(200);
+    const finalPrinters = Array.isArray(res.body.printers) ? res.body.printers : [];
+    expect(finalPrinters.length).toBe(initialCount);
+    expect(finalPrinters.find((p) => p.printerId === 'kitchen')).toBeUndefined();
+
+    createConnectionSpy.mockRestore();
   });
 });
