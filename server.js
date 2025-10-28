@@ -1175,10 +1175,8 @@ app.get('/profile', requireUiAuth, (req, res) => {
     if (!state.enabled) {
         return res.redirect('/ui');
     }
-    const signedInUserRaw = typeof res.locals.uiUser === 'string' ? res.locals.uiUser : state.username;
-    const userMenuHtml = buildUserMenu(state, signedInUserRaw);
     res.set('Content-Type', 'text/html');
-    res.send(renderProfilePage({ username: state.username, userMenuHtml }));
+    res.send(renderProfilePage({ username: state.username }));
 });
 
 app.post('/profile', requireUiAuth, (req, res) => {
@@ -1194,10 +1192,8 @@ app.post('/profile', requireUiAuth, (req, res) => {
     const confirmPassword = typeof req.body?.passwordConfirm === 'string' ? req.body.passwordConfirm : '';
 
     const respond = ({ status = 200, username = state.username, error, success }) => {
-        const signedInUserRaw = typeof res.locals.uiUser === 'string' ? res.locals.uiUser : username;
-        const userMenuHtml = buildUserMenu(state, signedInUserRaw);
         res.status(status).set('Content-Type', 'text/html');
-        res.send(renderProfilePage({ username, error, success, userMenuHtml }));
+        res.send(renderProfilePage({ username, error, success }));
     };
 
     if (intent === 'update-username') {
