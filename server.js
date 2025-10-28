@@ -1311,6 +1311,13 @@ app.get('/ui', requireUiAuth, (req, res) => {
       border-radius: 999px;
       padding: 2px 6px;
     }
+    .chip__id--hidden {
+      display: none;
+    }
+    .chip--assigned:hover .chip__id--hidden,
+    .chip--assigned:focus-within .chip__id--hidden {
+      display: inline-flex;
+    }
     .label-chip {
       background: rgba(59, 127, 190, 0.18);
       color: #1e3a5f;
@@ -1473,8 +1480,9 @@ app.get('/ui', requireUiAuth, (req, res) => {
         const safeTerm = escapeHtml(det.terminalId || '');
         const safeLabelAttr = det.label ? escapeHtml(det.label) : '';
         const labelMarkup = det.label ? '<span class="chip__label">' + escapeHtml(det.label) + '</span>' : '';
-        const idMarkup = det.label ? '' : '<span class="chip__id">' + safeTerm + '</span>';
-        return '<span class="chip chip--assigned">' +
+        const idMarkup = '<span class="chip__id' + (det.label ? ' chip__id--hidden' : '') + '" data-terminal-id="' + safeTerm + '">' + safeTerm + '</span>';
+        const chipTitle = safeTerm ? ' title="' + safeTerm + '"' : '';
+        return '<span class="chip chip--assigned"' + chipTitle + '>' +
           labelMarkup + idMarkup +
           '<button type="button" class="chip__edit" data-terminal="' + safeTerm + '" data-label="' + safeLabelAttr + '">✎</button>' +
           '<button type="button" class="chip__remove" data-terminal="' + safeTerm + '" data-ip="' + safeIp + '" aria-label="Remove assignment for ' + safeTerm + '">×</button>' +
@@ -1666,6 +1674,27 @@ app.get('/ui', requireUiAuth, (req, res) => {
         } else if (userMenuEl.classList.contains('is-open') && !ev.target.closest('.user-menu')) {
           closeUserMenu();
         }
+      }
+      const terminalIdSpan = ev.target.closest('.chip__id');
+      if (terminalIdSpan) {
+        const copyValue = terminalIdSpan.getAttribute('data-terminal-id') || terminalIdSpan.textContent || '';
+        const trimmed = copyValue.trim();
+        if (trimmed) {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(trimmed).catch(() => {});
+          } else {
+            try {
+              const range = document.createRange();
+              range.selectNodeContents(terminalIdSpan);
+              const selection = window.getSelection();
+              selection.removeAllRanges();
+              selection.addRange(range);
+            } catch (err) {
+              console.error('Copy fallback failed', err);
+            }
+          }
+        }
+        return;
       }
       const editBtn = ev.target.closest('button.chip__edit');
       if (editBtn) {
