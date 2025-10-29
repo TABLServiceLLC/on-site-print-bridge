@@ -34,7 +34,13 @@ HTTPS print bridge for ESC/POS printers. Discovers printers on the LAN and forwa
     - `JWT_SECRET=<your-secret>` (required to authenticate API calls)
     - Optionally set `SUBNET` (CIDR) if not detected automatically
   - Generate HTTPS certs (self-signed) in repo root:
-    - `openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 365 -subj "/CN=localhost"`
+    - ```bash
+      openssl req -x509 -newkey rsa:4096 -sha256 -days 365 \
+        -keyout key.pem -out cert.pem -nodes \
+        -subj "/CN=raspberrypi.local" \
+        -addext "subjectAltName=DNS:raspberrypi.local"
+      ```
+    - Replace `raspberrypi.local` with the hostname clients use; keep the subject/alt name in sync.
 - Run
   - Start (dev): `npm start` (serves at `https://localhost:8443`)
   - Recommended PM2 (auto-start on boot):
