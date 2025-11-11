@@ -26,6 +26,8 @@ const JWT_SECRET = process.env.JWT_SECRET || '';
 const SESSION_COOKIE_NAME = 'tabl_ui_session';
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const sessions = new Map();
+const KEY_FILE_PATH = path.join(__dirname, 'key.pem');
+const CERT_FILE_PATH = path.join(__dirname, 'cert.pem');
 
 const DEFAULT_ALLOWED_ORIGINS = ['https://pos.tabl.page', 'http://localhost:8080', 'https://raspberrypi.local', 'https://raspberrypi.local:8443'];
 
@@ -911,6 +913,7 @@ const NAV_LINKS = [
     { href: '/ui', label: 'Dashboard' },
     { href: '/ui/printers', label: 'Printers' },
     { href: '/ui/terminals', label: 'Terminals' },
+    { href: '/cert', label: 'Certificate' },
 ];
 
 const GLOBAL_NAV_STYLES = `
@@ -1050,6 +1053,92 @@ const GLOBAL_NAV_STYLES = `
     }
     .user-menu__logout {
       color: #b3261e;
+    }
+`;
+
+const CERT_PAGE_STYLES = `
+    :root { color-scheme: light; font-size: 16px; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: -apple-system, system-ui, Segoe UI, Roboto, Arial, sans-serif;
+      background-color: #f5f7fb;
+      background-image:
+        radial-gradient(120% 120% at 12% -10%, rgba(59, 127, 190, 0.14), transparent 55%),
+        radial-gradient(120% 120% at 88% 0%, rgba(15, 27, 51, 0.1), transparent 60%),
+        linear-gradient(180deg, #f6f9ff 0%, #ffffff 100%);
+      background-attachment: fixed;
+      background-repeat: no-repeat;
+      color: #0f172a;
+    }
+    .cert-page {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 48px 24px 64px;
+    }
+    .cert-card {
+      background: #fff;
+      border-radius: 20px;
+      padding: 36px;
+      box-shadow: 0 20px 45px rgba(15, 23, 42, 0.1);
+    }
+    .cert-card h1 {
+      margin: 0 0 8px;
+      font-size: 30px;
+      letter-spacing: -0.01em;
+    }
+    .cert-card p {
+      margin: 0 0 18px;
+      font-size: 16px;
+      color: #475569;
+    }
+    .cert-meta {
+      font-size: 14px;
+      color: #64748b;
+      margin-bottom: 24px;
+    }
+    .cert-meta--warning {
+      color: #b3261e;
+    }
+    .cert-actions {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .cert-button {
+      border: none;
+      border-radius: 999px;
+      padding: 12px 24px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      color: #fff;
+      background: linear-gradient(135deg, #3B7FBE 0%, #265785 100%);
+      box-shadow: 0 14px 30px rgba(59, 127, 190, 0.35);
+      transition: transform 120ms ease, box-shadow 120ms ease;
+    }
+    .cert-button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 18px 38px rgba(59, 127, 190, 0.4);
+    }
+    .cert-button:focus-visible {
+      outline: 3px solid rgba(59, 127, 190, 0.4);
+      outline-offset: 2px;
+    }
+    .cert-note {
+      font-size: 14px;
+      color: #334155;
+      background: #f1f5f9;
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-top: 18px;
+    }
+    .cert-error {
+      color: #b3261e;
+      font-weight: 600;
+      margin: 18px 0 0;
     }
 `;
 
@@ -1324,6 +1413,135 @@ app.get('/is-ip/:value', (req, res) => {
 
 // Optional example using axios (won't run unless endpoint is called)
 // Example external call route removed to avoid external dependencies
+
+// Self-service page to distribute the HTTPS certificate
+app.get('/cert', requireUiAuth, (req, res) => {
+    const formatBytes = (bytes) => {
+        if (!Number.isFinite(bytes) || bytes <= 0) return 'Unknown size';
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+    };
+    const authState = getUiAuthState();
+    const signedInUserRaw = typeof res.locals.uiUser === 'string' ? res.locals.uiUser : authState.enabled ? authState.username : '';
+    const userMenuHtml = buildUserMenu(authState, signedInUserRaw);
+    const navHtml = buildNavBar({ currentPath: req.path, signedIn: Boolean(signedInUserRaw), userMenuHtml });
+
+    let certExists = false;
+    let certSizeLabel = 'Unknown size';
+    let certUpdatedLabel = 'Unknown';
+    try {
+        const stats = fs.statSync(CERT_FILE_PATH);
+        if (stats && stats.isFile()) {
+            certExists = true;
+            certSizeLabel = formatBytes(stats.size);
+            certUpdatedLabel = stats.mtime ? stats.mtime.toLocaleString() : 'Unknown';
+        }
+    } catch (_) {
+        certExists = false;
+    }
+
+    const metaMarkup = certExists
+        ? `<p class="cert-meta">Last updated: ${escapeHtmlLite(certUpdatedLabel)} • Size: ${escapeHtmlLite(certSizeLabel)}</p>`
+        : '<p class="cert-meta cert-meta--warning">Certificate file not found on this bridge.</p>';
+    const actionMarkup = certExists
+        ? `<form class="cert-actions" method="GET" action="/cert/download">
+            <button class="cert-button" type="submit">Download cert.pem</button>
+          </form>`
+        : '<p class="cert-error">Place cert.pem in the application root and reload this page.</p>';
+
+    const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Download Certificate · TABL Print Bridge</title>
+  <meta name="theme-color" content="#3B7FBE" />
+  <link rel="icon" type="image/x-icon" href="/assets/favicon.ico" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.webp" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.webp" />
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.webp" />
+  <link rel="manifest" href="/assets/site.webmanifest" />
+  <style>
+    ${GLOBAL_NAV_STYLES}
+    ${CERT_PAGE_STYLES}
+  </style>
+</head>
+<body>
+  ${navHtml}
+  <main class="cert-page">
+    <section class="cert-card">
+      <h1>Download Certificate</h1>
+      <p>Install this certificate on clients that should trust the TABL Print Bridge HTTPS endpoint.</p>
+      ${metaMarkup}
+      ${actionMarkup}
+      <p class="cert-note">After downloading <code>cert.pem</code>, add it to your operating system or browser trust store, then restart any apps that connect to the bridge.</p>
+    </section>
+  </main>
+  <script>
+    (function() {
+      const userMenuEl = document.querySelector('.user-menu');
+      const trigger = userMenuEl ? userMenuEl.querySelector('.user-menu__trigger') : null;
+      const logoutRedirectInput = userMenuEl ? userMenuEl.querySelector('form[action="/logout"] input[name="redirect"]') : null;
+      if (logoutRedirectInput) {
+        const currentPath = (window.location.pathname || '/cert') + (window.location.search || '');
+        logoutRedirectInput.value = encodeURIComponent(currentPath || '/login');
+      }
+      const closeMenu = () => {
+        if (!userMenuEl || !trigger) return;
+        userMenuEl.classList.remove('is-open');
+        trigger.setAttribute('aria-expanded', 'false');
+      };
+      const toggleMenu = () => {
+        if (!userMenuEl || !trigger) return;
+        const willOpen = !userMenuEl.classList.contains('is-open');
+        if (willOpen) {
+          userMenuEl.classList.add('is-open');
+          trigger.setAttribute('aria-expanded', 'true');
+        } else {
+          closeMenu();
+        }
+      };
+      document.addEventListener('click', (event) => {
+        if (!userMenuEl || !trigger) return;
+        if (event.target.closest('.user-menu__trigger')) {
+          event.preventDefault();
+          toggleMenu();
+          return;
+        }
+        if (event.target.closest('.user-menu__link')) {
+          closeMenu();
+        } else if (userMenuEl.classList.contains('is-open') && !event.target.closest('.user-menu')) {
+          closeMenu();
+        }
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') closeMenu();
+      });
+    })();
+  </script>
+</body>
+</html>`;
+    res.set('Content-Type', 'text/html');
+    res.send(html);
+});
+
+app.get('/cert/download', requireUiAuth, (req, res) => {
+    if (!fs.existsSync(CERT_FILE_PATH)) {
+        logger.warn('Certificate download requested but file not found');
+        return res.status(404).json({ error: 'Certificate not found.' });
+    }
+    return res.download(CERT_FILE_PATH, 'cert.pem', (err) => {
+        if (err) {
+            logger.error('Certificate download failed', { error: err.message });
+            if (!res.headersSent) {
+                res.status(err.statusCode || 500).json({ error: 'Unable to download certificate.' });
+            }
+        } else {
+            logger.info('Certificate downloaded', { username: res.locals.uiUser || 'unknown' });
+        }
+    });
+});
 
 // Basic UI to view printers and assign mapping
 app.get('/ui', requireUiAuth, (req, res) => {
@@ -3471,13 +3689,10 @@ app.post('/print/global', authenticateToken, async (req, res) => {
 });
 
 // HTTPS server setup with self-signed certificates
-const keyPath = path.join(__dirname, 'key.pem');
-const certPath = path.join(__dirname, 'cert.pem');
-
 function boot() {
     const credentials = {
-        key: fs.readFileSync(keyPath),
-        cert: fs.readFileSync(certPath),
+        key: fs.readFileSync(KEY_FILE_PATH),
+        cert: fs.readFileSync(CERT_FILE_PATH),
     };
     https.createServer(credentials, app).listen(PORT, () => {
         logger.info(`HTTPS server listening on https://localhost:${PORT}`);
