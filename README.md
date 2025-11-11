@@ -45,10 +45,23 @@ HTTPS print bridge for ESC/POS printers. Discovers printers on the LAN and forwa
       ```bash
       openssl genrsa -out server.key 4096
       openssl req -new -key server.key -out server.csr \
-        -subj "/CN=raspberrypi.local" \
-        -addext "subjectAltName=DNS:raspberrypi.local"
+        -subj "/CN=raspberrypi.local"
+      ```
+    - Create `server-ext.cnf` (kept alongside the CSR) so you can reuse the TLS extensions:
+      ```bash
+      cat > server-ext.cnf <<'EOF'
+      [ server_ext ]
+      basicConstraints=CA:FALSE
+      keyUsage=digitalSignature,keyEncipherment
+      extendedKeyUsage=serverAuth
+      subjectAltName=DNS:raspberrypi.local
+      EOF
+      ```
+      Update `subjectAltName` with every hostname/IP clients use (comma-separate multiple entries).
+    - Sign the CSR with that CA, referencing the extensions file:
+      ```bash
       openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAserial ca.srl \
-        -out server.crt -days 825 -sha256 -copy_extensions copyall
+        -out server.crt -days 825 -sha256 -extfile server-ext.cnf -extensions server_ext
       ```
     - Replace `raspberrypi.local` with the hostname clients use; keep the subject/alt name list in sync.
 - Run

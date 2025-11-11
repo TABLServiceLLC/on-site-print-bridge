@@ -41,6 +41,7 @@ ca.srl
 server.key
 server.crt
 server.csr
+server-ext.cnf
 
 # Local data files
 printerMap.json
