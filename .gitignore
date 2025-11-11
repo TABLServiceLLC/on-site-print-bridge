@@ -35,6 +35,12 @@ coverage/
 # TLS keys (local self-signed)
 key.pem
 cert.pem
+ca.key
+ca.crt
+ca.srl
+server.key
+server.crt
+server.csr
 
 # Local data files
 printerMap.json

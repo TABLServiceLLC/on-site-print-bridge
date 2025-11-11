@@ -33,14 +33,24 @@ HTTPS print bridge for ESC/POS printers. Discovers printers on the LAN and forwa
   - Edit `.env` and set at minimum:
     - `JWT_SECRET=<your-secret>` (required to authenticate API calls)
     - Optionally set `SUBNET` (CIDR) if not detected automatically
-  - Generate HTTPS certs (self-signed) in repo root:
-    - ```bash
-      openssl req -x509 -newkey rsa:4096 -sha256 -days 365 \
-        -keyout key.pem -out cert.pem -nodes \
+  - Generate HTTPS certs (self-signed CA + signed server cert) in the repo root:
+    - Create a certificate authority once (outputs `ca.key`, `ca.crt`, `ca.srl`):
+      ```bash
+      openssl genrsa -out ca.key 4096
+      openssl req -x509 -new -key ca.key -sha256 -days 3650 \
+        -out ca.crt -subj "/CN=TABL Print Bridge CA"
+      openssl rand -hex 16 > ca.srl
+      ```
+    - Issue a server certificate signed by that CA (outputs `server.key`, `server.csr`, `server.crt`):
+      ```bash
+      openssl genrsa -out server.key 4096
+      openssl req -new -key server.key -out server.csr \
         -subj "/CN=raspberrypi.local" \
         -addext "subjectAltName=DNS:raspberrypi.local"
+      openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAserial ca.srl \
+        -out server.crt -days 825 -sha256 -copy_extensions copyall
       ```
-    - Replace `raspberrypi.local` with the hostname clients use; keep the subject/alt name in sync.
+    - Replace `raspberrypi.local` with the hostname clients use; keep the subject/alt name list in sync.
 - Run
   - Start (dev): `npm start` (serves at `https://localhost:8443`)
   - Recommended PM2 (auto-start on boot):
@@ -90,7 +100,7 @@ Set in `.env` (defaults shown where applicable):
 - Logging
   - `LOG_FILE` — path to log file (default `bridge.log`)
 
-Certificates: server reads `key.pem` and `cert.pem` from the repo root.
+Certificates: place `server.key` + `server.crt` (signed by your CA) and `ca.crt` in the repo root; `/cert` serves the CA for clients to trust.
 
 ---
 
@@ -184,7 +194,7 @@ Examples:
 ## 🧰 Troubleshooting
 
 - UI loads but no printers: wait for discovery to finish or click Refresh; inspect `bridge.log` for recent scan results.
-- Cert warnings in browser: self-signed cert. Use `-k` in curl or trust the cert.
+- Cert warnings in browser: self-signed CA. Use `-k` in curl or import `ca.crt` into the client trust store.
 - Cloud polling TLS: set `PRINT_POLL_CA_FILE` for private CAs; avoid `PRINT_POLL_INSECURE_TLS=true` unless necessary.
 
 ---

@@ -28,6 +28,7 @@ const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const sessions = new Map();
 const KEY_FILE_PATH = path.join(__dirname, 'server.key');
 const CERT_FILE_PATH = path.join(__dirname, 'server.crt');
+const CA_FILE_PATH = path.join(__dirname, 'ca.crt');
 
 const DEFAULT_ALLOWED_ORIGINS = ['https://pos.tabl.page', 'http://localhost:8080', 'https://raspberrypi.local', 'https://raspberrypi.local:8443'];
 
@@ -1431,7 +1432,7 @@ app.get('/cert', requireUiAuth, (req, res) => {
     let certSizeLabel = 'Unknown size';
     let certUpdatedLabel = 'Unknown';
     try {
-        const stats = fs.statSync(CERT_FILE_PATH);
+        const stats = fs.statSync(CA_FILE_PATH);
         if (stats && stats.isFile()) {
             certExists = true;
             certSizeLabel = formatBytes(stats.size);
@@ -1441,12 +1442,12 @@ app.get('/cert', requireUiAuth, (req, res) => {
         certExists = false;
     }
 
-    const metaMarkup = certExists ? `<p class="cert-meta">Last updated: ${escapeHtmlLite(certUpdatedLabel)} • Size: ${escapeHtmlLite(certSizeLabel)}</p>` : '<p class="cert-meta cert-meta--warning">Certificate file not found on this bridge.</p>';
+    const metaMarkup = certExists ? `<p class="cert-meta">Last updated: ${escapeHtmlLite(certUpdatedLabel)} • Size: ${escapeHtmlLite(certSizeLabel)}</p>` : '<p class="cert-meta cert-meta--warning">CA certificate file not found on this bridge.</p>';
     const actionMarkup = certExists
         ? `<form class="cert-actions" method="GET" action="/cert/download">
-            <button class="cert-button" type="submit">Download cert.pem</button>
+            <button class="cert-button" type="submit">Download ca.crt</button>
           </form>`
-        : '<p class="cert-error">Place cert.pem in the application root and reload this page.</p>';
+        : '<p class="cert-error">Place ca.crt in the application root and reload this page.</p>';
 
     const html = `<!doctype html>
 <html lang="en">
@@ -1470,10 +1471,10 @@ app.get('/cert', requireUiAuth, (req, res) => {
   <main class="cert-page">
     <section class="cert-card">
       <h1>Download Certificate</h1>
-      <p>Install this certificate on clients that should trust the TABL Print Bridge HTTPS endpoint.</p>
+      <p>Install this CA certificate on clients that should trust the TABL Print Bridge HTTPS endpoint.</p>
       ${metaMarkup}
       ${actionMarkup}
-      <p class="cert-note">After downloading <code>cert.pem</code>, add it to your operating system or browser trust store, then restart any apps that connect to the bridge.</p>
+      <p class="cert-note">After downloading <code>ca.crt</code>, add it to your operating system or browser trust store, then restart any apps that connect to the bridge.</p>
     </section>
   </main>
   <script>
@@ -1525,18 +1526,18 @@ app.get('/cert', requireUiAuth, (req, res) => {
 });
 
 app.get('/cert/download', requireUiAuth, (req, res) => {
-    if (!fs.existsSync(CERT_FILE_PATH)) {
-        logger.warn('Certificate download requested but file not found');
+    if (!fs.existsSync(CA_FILE_PATH)) {
+        logger.warn('CA certificate download requested but file not found');
         return res.status(404).json({ error: 'Certificate not found.' });
     }
-    return res.download(CERT_FILE_PATH, 'cert.pem', (err) => {
+    return res.download(CA_FILE_PATH, 'ca.crt', (err) => {
         if (err) {
             logger.error('Certificate download failed', { error: err.message });
             if (!res.headersSent) {
                 res.status(err.statusCode || 500).json({ error: 'Unable to download certificate.' });
             }
         } else {
-            logger.info('Certificate downloaded', { username: res.locals.uiUser || 'unknown' });
+            logger.info('CA certificate downloaded', { username: res.locals.uiUser || 'unknown' });
         }
     });
 });
