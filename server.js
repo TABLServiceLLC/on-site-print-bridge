@@ -26,8 +26,8 @@ const JWT_SECRET = process.env.JWT_SECRET || '';
 const SESSION_COOKIE_NAME = 'tabl_ui_session';
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const sessions = new Map();
-const KEY_FILE_PATH = path.join(__dirname, 'key.pem');
-const CERT_FILE_PATH = path.join(__dirname, 'cert.pem');
+const KEY_FILE_PATH = path.join(__dirname, 'server.key');
+const CERT_FILE_PATH = path.join(__dirname, 'server.crt');
 
 const DEFAULT_ALLOWED_ORIGINS = ['https://pos.tabl.page', 'http://localhost:8080', 'https://raspberrypi.local', 'https://raspberrypi.local:8443'];
 
@@ -1441,9 +1441,7 @@ app.get('/cert', requireUiAuth, (req, res) => {
         certExists = false;
     }
 
-    const metaMarkup = certExists
-        ? `<p class="cert-meta">Last updated: ${escapeHtmlLite(certUpdatedLabel)} • Size: ${escapeHtmlLite(certSizeLabel)}</p>`
-        : '<p class="cert-meta cert-meta--warning">Certificate file not found on this bridge.</p>';
+    const metaMarkup = certExists ? `<p class="cert-meta">Last updated: ${escapeHtmlLite(certUpdatedLabel)} • Size: ${escapeHtmlLite(certSizeLabel)}</p>` : '<p class="cert-meta cert-meta--warning">Certificate file not found on this bridge.</p>';
     const actionMarkup = certExists
         ? `<form class="cert-actions" method="GET" action="/cert/download">
             <button class="cert-button" type="submit">Download cert.pem</button>
@@ -3693,6 +3691,7 @@ function boot() {
     const credentials = {
         key: fs.readFileSync(KEY_FILE_PATH),
         cert: fs.readFileSync(CERT_FILE_PATH),
+        minVersion: 'TLSv1.2',
     };
     https.createServer(credentials, app).listen(PORT, () => {
         logger.info(`HTTPS server listening on https://localhost:${PORT}`);
