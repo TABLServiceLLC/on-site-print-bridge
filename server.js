@@ -1530,7 +1530,7 @@ app.get('/cert/download', requireUiAuth, (req, res) => {
         logger.warn('CA certificate download requested but file not found');
         return res.status(404).json({ error: 'Certificate not found.' });
     }
-    return res.download(CA_FILE_PATH, 'ca.crt', (err) => {
+    return res.download(CA_FILE_PATH, 'tabl_service.crt', (err) => {
         if (err) {
             logger.error('Certificate download failed', { error: err.message });
             if (!res.headersSent) {
