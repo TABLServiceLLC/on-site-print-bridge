@@ -1,6 +1,6 @@
 # 🖨️ Print Bridge Agent
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.md)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE.md)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-green?logo=node.js)](https://nodejs.org/)
 [![Express](https://img.shields.io/badge/express-5.x-blue?logo=express&logoColor=white)](#)
 [![Tests](https://img.shields.io/badge/tests-jest-%23C21325?logo=jest&logoColor=white)](#)
@@ -221,4 +221,4 @@ Examples:
 
 ## 📄 License
 
-MIT License — see [LICENSE.md](LICENSE.md)
+Apache License 2.0 — see [LICENSE.md](LICENSE.md)
