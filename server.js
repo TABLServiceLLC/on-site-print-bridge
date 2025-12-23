@@ -21,7 +21,17 @@ const { readCredentials, writeCredentials, CREDENTIALS_PATH } = require('./uiCre
 const { getAllLabels, getAllPrinterLabels, getAllTerminalLabels, setPrinterLabel, removePrinterLabel, setTerminalLabel, removeTerminalLabel } = require('./printerLabels');
 const { getAllGlobalPrinters, getGlobalPrinter, setGlobalPrinter, removeGlobalPrinter } = require('./globalPrinters');
 const DISCOVERY_INTERVAL_MS = parseInt(process.env.DISCOVERY_INTERVAL_MS || '300000', 10); // 5 minutes
-const DISCOVERY_PORTS = [9100, 515, 631, 80, 443];
+const DEFAULT_DISCOVERY_PORTS = [9100];
+const DISCOVERY_PORTS = (process.env.DISCOVERY_PORTS || '')
+    .split(/[\s,]+/)
+    .map((item) => parseInt(item, 10))
+    .filter((value) => Number.isInteger(value) && value > 0)
+    .filter((value, idx, arr) => arr.indexOf(value) === idx);
+if (DISCOVERY_PORTS.length === 0) {
+    DISCOVERY_PORTS.push(...DEFAULT_DISCOVERY_PORTS);
+}
+const DISCOVERY_REVERSE_DNS = ['1', 'true', 'yes', 'on'].includes(String(process.env.DISCOVERY_REVERSE_DNS || '').toLowerCase());
+const DISCOVERY_ON_MISSING_MAPPING = ['1', 'true', 'yes', 'on'].includes(String(process.env.DISCOVERY_ON_MISSING_MAPPING || '').toLowerCase());
 const JWT_SECRET = process.env.JWT_SECRET || '';
 const SESSION_COOKIE_NAME = 'tabl_ui_session';
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -3409,35 +3419,47 @@ app.get('/ui/terminals', requireUiAuth, (req, res) => {
 //   all: optional, include hosts without 9100 open
 // Cached discovery state
 let discoveryCache = { cidr: null, lastUpdated: 0, printers: [] };
+let discoveryInFlight = null;
 
 function truthy(v) {
     return ['1', 'true', 'yes', 'on'].includes(String(v).toLowerCase());
 }
 
 async function runDiscovery(cidr) {
-    const selectedCidr = cidr || process.env.SUBNET || defaultCidrFromInterfaces();
-    logger.info('Printer discovery started', { cidr: selectedCidr, ports: DISCOVERY_PORTS });
-    try {
-        const discovered = await scanNetwork({ cidr: selectedCidr, ports: DISCOVERY_PORTS, timeoutMs: 800, concurrency: 128, includeNon9100: false });
-        const printers = await Promise.all(
-            discovered.map(async (d) => {
-                let hostname = null;
-                try {
-                    const names = await dns.reverse(d.ip);
-                    hostname = names && names.length ? names[0] : null;
-                } catch (_) {
-                    hostname = null;
-                }
-                return { ip: d.ip, ports: d.openPorts, mac: d.mac || null, hostname };
-            })
-        );
-        discoveryCache = { cidr: selectedCidr, lastUpdated: Date.now(), printers };
-        logger.info('Printer discovery complete', { cidr: selectedCidr, count: printers.length });
-        return printers;
-    } catch (err) {
-        logger.error('Printer discovery failed', { error: err.message });
-        throw err;
+    if (discoveryInFlight) {
+        return discoveryInFlight;
     }
+    const selectedCidr = cidr || process.env.SUBNET || defaultCidrFromInterfaces();
+    const start = async () => {
+        logger.info('Printer discovery started', { cidr: selectedCidr, ports: DISCOVERY_PORTS, reverseDns: DISCOVERY_REVERSE_DNS });
+        try {
+            const discovered = await scanNetwork({ cidr: selectedCidr, ports: DISCOVERY_PORTS, timeoutMs: 800, concurrency: 128, includeNon9100: false });
+            const printers = await Promise.all(
+                discovered.map(async (d) => {
+                    let hostname = null;
+                    if (DISCOVERY_REVERSE_DNS) {
+                        try {
+                            const names = await dns.reverse(d.ip);
+                            hostname = names && names.length ? names[0] : null;
+                        } catch (_) {
+                            hostname = null;
+                        }
+                    }
+                    return { ip: d.ip, ports: d.openPorts, mac: d.mac || null, hostname };
+                })
+            );
+            discoveryCache = { cidr: selectedCidr, lastUpdated: Date.now(), printers };
+            logger.info('Printer discovery complete', { cidr: selectedCidr, count: printers.length });
+            return printers;
+        } catch (err) {
+            logger.error('Printer discovery failed', { error: err.message });
+            throw err;
+        } finally {
+            discoveryInFlight = null;
+        }
+    };
+    discoveryInFlight = start();
+    return discoveryInFlight;
 }
 
 app.get('/printers', async (req, res) => {
@@ -3612,26 +3634,35 @@ app.post('/print', authenticateToken, async (req, res) => {
 
     const ip = getPrinterIp(terminalId);
     if (!ip) {
-        try {
-            const cidr = process.env.SUBNET || defaultCidrFromInterfaces();
-            logger.warn('No printer mapping found; starting discovery', { terminalId, cidr });
-            const discovered = await scanNetwork({ cidr, ports: [9100, 515, 631], timeoutMs: 800, concurrency: 128, includeNon9100: false });
-            logger.info('Discovery result for missing mapping', { terminalId, count: discovered.length, printers: discovered });
-            return res.status(404).json({
-                error: 'No printer mapping found for terminalId',
-                terminalId,
-                hint: 'Set mapping in printerMap.json or via utility',
-                discoveredPrinters: discovered,
-            });
-        } catch (e) {
-            logger.error('Discovery failed for missing mapping', { terminalId, error: e.message });
-            return res.status(404).json({
-                error: 'No printer mapping found for terminalId',
-                terminalId,
-                discoveredPrinters: [],
-                discoveryError: e.message,
-            });
+        if (DISCOVERY_ON_MISSING_MAPPING) {
+            try {
+                const cidr = process.env.SUBNET || defaultCidrFromInterfaces();
+                logger.warn('No printer mapping found; starting discovery', { terminalId, cidr });
+                const discovered = await scanNetwork({ cidr, ports: DISCOVERY_PORTS, timeoutMs: 800, concurrency: 128, includeNon9100: false });
+                logger.info('Discovery result for missing mapping', { terminalId, count: discovered.length, printers: discovered });
+                return res.status(404).json({
+                    error: 'No printer mapping found for terminalId',
+                    terminalId,
+                    hint: 'Set mapping in printerMap.json or via utility',
+                    discoveredPrinters: discovered,
+                });
+            } catch (e) {
+                logger.error('Discovery failed for missing mapping', { terminalId, error: e.message });
+                return res.status(404).json({
+                    error: 'No printer mapping found for terminalId',
+                    terminalId,
+                    discoveredPrinters: [],
+                    discoveryError: e.message,
+                });
+            }
         }
+        const cached = discoveryCache.printers || [];
+        return res.status(404).json({
+            error: 'No printer mapping found for terminalId',
+            terminalId,
+            hint: 'Set mapping in printerMap.json or via utility',
+            discoveredPrinters: cached,
+        });
     }
 
     let payload;
